@@ -1445,3 +1445,61 @@ char *x264_param2string( x264_param_t *p, int b_res )
     return buf;
 }
 
+// added by Wenchy 2016-03-02
+void save_frame(x264_t *h)
+{
+    FILE *pFile;
+    char szFilename[32];
+    int  x, y;
+    pixel zero = 0;
+
+    x264_frame_t *fenc = h->fenc;
+    int width =  h->fenc->i_width[0];
+    int height = h->fenc->i_lines[0];
+
+
+    // Open file
+    if(h->fenc->i_type == X264_TYPE_I)
+    {
+    	sprintf(szFilename, "%d_frame_I.ppm", h->fenc->i_frame);
+    } else if( h->fenc->i_type == X264_TYPE_P )
+    {
+    	sprintf(szFilename, "%d_frame_P.ppm", h->fenc->i_frame);
+    } else if(h->fenc->i_type == X264_TYPE_B )
+    {
+    	sprintf(szFilename, "%d_frame_B.ppm", h->fenc->i_frame);
+    } else if(h->fenc->i_type == X264_TYPE_IDR )
+    {
+    	sprintf(szFilename, "%d_frame_IDR.ppm", h->fenc->i_frame);
+    } else if(h->fenc->i_type == X264_TYPE_BREF )
+    {
+    	sprintf(szFilename, "%d_frame_BREF.ppm", h->fenc->i_frame);
+    } else if(h->fenc->i_type == X264_TYPE_KEYFRAME )
+    {
+    	sprintf(szFilename, "%d_frame_KEYFRAM.ppm", h->fenc->i_frame);
+    } else
+    {
+    	sprintf(szFilename, "%d_frame_UnknownType(%d).ppm", h->fenc->i_frame, fenc->i_type);
+    }
+
+    pFile = fopen(szFilename, "wb");
+
+    if(pFile == NULL) {
+        return;
+    }
+
+    // Write header
+    fprintf(pFile, "P6\n%d %d\n255\n", width, height);
+
+    // Write pixel data
+    for(y = 0; y < height; y++) {
+    	for(x = 0; x < width; x++) {
+		   fwrite(&(h->fenc->plane[0][x+h->fenc->i_stride[0]*y]), 1, 1, pFile);
+		   fwrite(&zero, 1, 1, pFile);
+		   fwrite(&zero, 1, 1, pFile);
+    	}
+	}
+
+    // Close file
+    fclose(pFile);
+}

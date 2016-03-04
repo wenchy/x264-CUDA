@@ -1014,6 +1014,8 @@ static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[
 #endif
 
 #include "rectangle.h"
+// added by Wenchy 2016-03-02
+void save_frame(x264_t *h);
 
 #endif
 
