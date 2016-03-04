@@ -276,6 +276,7 @@ clean:
 	rm -f checkasm checkasm.exe $(OBJCHK) $(GENERATED) x264_lookahead.clbin
 	rm -f example example.exe $(OBJEXAMPLE)
 	rm -f $(SRC2:%.c=%.gcda) $(SRC2:%.c=%.gcno) *.dyn pgopti.dpi pgopti.dpi.lock *.pgd *.pgc
+	rm -f *.ppm *.mkv *.mp4 # added by Wenchy 2016-03-04
 
 distclean: clean
 	rm -f config.mak x264_config.h config.h config.log x264.pc x264.def conftest*
