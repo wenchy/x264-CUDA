@@ -1058,8 +1058,12 @@ static int x264_validate_parameters( x264_t *h, int b_open )
     if( h->param.i_cqm_preset < X264_CQM_FLAT || h->param.i_cqm_preset > X264_CQM_CUSTOM )
         h->param.i_cqm_preset = X264_CQM_FLAT;
 
+    // if( h->param.analyse.i_me_method < X264_ME_DIA ||
+    //     h->param.analyse.i_me_method > X264_ME_TESA )
+    //     h->param.analyse.i_me_method = X264_ME_HEX;
+    // modified by Wenchy 2016-03-09: change X264_ME_TESA to X264_ME_CUDA_ESA
     if( h->param.analyse.i_me_method < X264_ME_DIA ||
-        h->param.analyse.i_me_method > X264_ME_TESA )
+        h->param.analyse.i_me_method > X264_ME_CUDA_ESA )
         h->param.analyse.i_me_method = X264_ME_HEX;
     h->param.analyse.i_me_range = x264_clip3( h->param.analyse.i_me_range, 4, 1024 );
     if( h->param.analyse.i_me_range > 16 && h->param.analyse.i_me_method <= X264_ME_HEX )
@@ -2423,6 +2427,7 @@ static void x264_fdec_filter_row( x264_t *h, int mb_y, int pass )
 
 static inline int x264_reference_update( x264_t *h )
 {
+	//when b frame is not used as reference frame
     if( !h->fdec->b_kept_as_ref )
     {
         if( h->i_thread_frames > 1 )
@@ -2700,268 +2705,539 @@ static intptr_t x264_slice_write( x264_t *h )
     i_mb_x = h->sh.i_first_mb % h->mb.i_mb_width;
     i_skip = 0;
 
-    while( 1 )
+    // added by Wenchy 2016-03-04
+    // Parallelize ME of P frame
+    if( h->sh.i_type == SLICE_TYPE_P )
     {
-        mb_xy = i_mb_x + i_mb_y * h->mb.i_mb_width;
-        int mb_spos = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
+    	while( 1 )
+		{
+			mb_xy = i_mb_x + i_mb_y * h->mb.i_mb_width;
+			int mb_spos = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
 
-        if( i_mb_x == 0 )
-        {
-            if( x264_bitstream_check_buffer( h ) )
-                return -1;
-            if( !(i_mb_y & SLICE_MBAFF) && h->param.rc.i_vbv_buffer_size )
-                x264_bitstream_backup( h, &bs_bak[BS_BAK_ROW_VBV], i_skip, 1 );
-            if( !h->mb.b_reencode_mb )
-                x264_fdec_filter_row( h, i_mb_y, 0 );
-        }
+			if( i_mb_x == 0 )
+			{
+				if( x264_bitstream_check_buffer( h ) )
+					return -1;
+				if( !(i_mb_y & SLICE_MBAFF) && h->param.rc.i_vbv_buffer_size )
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_ROW_VBV], i_skip, 1 );
+				if( !h->mb.b_reencode_mb )
+					x264_fdec_filter_row( h, i_mb_y, 0 );
+			}
 
-        if( back_up_bitstream )
-        {
-            if( back_up_bitstream_cavlc )
-                x264_bitstream_backup( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], i_skip, 0 );
-            if( slice_max_size && !(i_mb_y & SLICE_MBAFF) )
-            {
-                x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], i_skip, 0 );
-                if( (thread_last_mb+1-mb_xy) == h->param.i_slice_min_mbs )
-                    x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], i_skip, 0 );
-            }
-        }
+			if( back_up_bitstream )
+			{
+				if( back_up_bitstream_cavlc )
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], i_skip, 0 );
+				if( slice_max_size && !(i_mb_y & SLICE_MBAFF) )
+				{
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], i_skip, 0 );
+					if( (thread_last_mb+1-mb_xy) == h->param.i_slice_min_mbs )
+						x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], i_skip, 0 );
+				}
+			}
 
-        if( PARAM_INTERLACED )
-        {
-            if( h->mb.b_adaptive_mbaff )
-            {
-                if( !(i_mb_y&1) )
-                {
-                    /* FIXME: VSAD is fast but fairly poor at choosing the best interlace type. */
-                    h->mb.b_interlaced = x264_field_vsad( h, i_mb_x, i_mb_y );
-                    memcpy( &h->zigzagf, MB_INTERLACED ? &h->zigzagf_interlaced : &h->zigzagf_progressive, sizeof(h->zigzagf) );
-                    if( !MB_INTERLACED && (i_mb_y+2) == h->mb.i_mb_height )
-                        x264_expand_border_mbpair( h, i_mb_x, i_mb_y );
-                }
-            }
-            h->mb.field[mb_xy] = MB_INTERLACED;
-        }
+			if( PARAM_INTERLACED )
+			{
+				if( h->mb.b_adaptive_mbaff )
+				{
+					if( !(i_mb_y&1) )
+					{
+						/* FIXME: VSAD is fast but fairly poor at choosing the best interlace type. */
+						h->mb.b_interlaced = x264_field_vsad( h, i_mb_x, i_mb_y );
+						memcpy( &h->zigzagf, MB_INTERLACED ? &h->zigzagf_interlaced : &h->zigzagf_progressive, sizeof(h->zigzagf) );
+						if( !MB_INTERLACED && (i_mb_y+2) == h->mb.i_mb_height )
+							x264_expand_border_mbpair( h, i_mb_x, i_mb_y );
+					}
+				}
+				h->mb.field[mb_xy] = MB_INTERLACED;
+			}
 
-        /* load cache */
-        if( SLICE_MBAFF )
-            x264_macroblock_cache_load_interlaced( h, i_mb_x, i_mb_y );
-        else
-            x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );
+			/* load cache */
+			if( SLICE_MBAFF )
+				x264_macroblock_cache_load_interlaced( h, i_mb_x, i_mb_y );
+			else
+				x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );
 
-        x264_macroblock_analyse( h );
+			x264_macroblock_analyse( h );
 
-        /* encode this macroblock -> be careful it can change the mb type to P_SKIP if needed */
-reencode:
-        x264_macroblock_encode( h );
+			/* encode this macroblock -> be careful it can change the mb type to P_SKIP if needed */
+	reencode_P:
+			x264_macroblock_encode( h );
 
-        if( h->param.b_cabac )
-        {
-            if( mb_xy > h->sh.i_first_mb && !(SLICE_MBAFF && (i_mb_y&1)) )
-                x264_cabac_encode_terminal( &h->cabac );
+			if( h->param.b_cabac )
+			{
+				if( mb_xy > h->sh.i_first_mb && !(SLICE_MBAFF && (i_mb_y&1)) )
+					x264_cabac_encode_terminal( &h->cabac );
 
-            if( IS_SKIP( h->mb.i_type ) )
-                x264_cabac_mb_skip( h, 1 );
-            else
-            {
-                if( h->sh.i_type != SLICE_TYPE_I )
-                    x264_cabac_mb_skip( h, 0 );
-                x264_macroblock_write_cabac( h, &h->cabac );
-            }
-        }
-        else
-        {
-            if( IS_SKIP( h->mb.i_type ) )
-                i_skip++;
-            else
-            {
-                if( h->sh.i_type != SLICE_TYPE_I )
-                {
-                    bs_write_ue( &h->out.bs, i_skip );  /* skip run */
-                    i_skip = 0;
-                }
-                x264_macroblock_write_cavlc( h );
-                /* If there was a CAVLC level code overflow, try again at a higher QP. */
-                if( h->mb.b_overflow )
-                {
-                    h->mb.i_chroma_qp = h->chroma_qp_table[++h->mb.i_qp];
-                    h->mb.i_skip_intra = 0;
-                    h->mb.b_skip_mc = 0;
-                    h->mb.b_overflow = 0;
-                    x264_bitstream_restore( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], &i_skip, 0 );
-                    goto reencode;
-                }
-            }
-        }
+				if( IS_SKIP( h->mb.i_type ) )
+					x264_cabac_mb_skip( h, 1 );
+				else
+				{
+					if( h->sh.i_type != SLICE_TYPE_I )
+						x264_cabac_mb_skip( h, 0 );
+					x264_macroblock_write_cabac( h, &h->cabac );
+				}
+			}
+			else
+			{
+				if( IS_SKIP( h->mb.i_type ) )
+					i_skip++;
+				else
+				{
+					if( h->sh.i_type != SLICE_TYPE_I )
+					{
+						bs_write_ue( &h->out.bs, i_skip );  /* skip run */
+						i_skip = 0;
+					}
+					x264_macroblock_write_cavlc( h );
+					/* If there was a CAVLC level code overflow, try again at a higher QP. */
+					if( h->mb.b_overflow )
+					{
+						h->mb.i_chroma_qp = h->chroma_qp_table[++h->mb.i_qp];
+						h->mb.i_skip_intra = 0;
+						h->mb.b_skip_mc = 0;
+						h->mb.b_overflow = 0;
+						x264_bitstream_restore( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], &i_skip, 0 );
+						goto reencode_P;
+					}
+				}
+			}
 
-        int total_bits = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
-        int mb_size = total_bits - mb_spos;
+			int total_bits = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
+			int mb_size = total_bits - mb_spos;
 
-        if( slice_max_size && (!SLICE_MBAFF || (i_mb_y&1)) )
-        {
-            /* Count the skip run, just in case. */
-            if( !h->param.b_cabac )
-                total_bits += bs_size_ue_big( i_skip );
-            /* Check for escape bytes. */
-            uint8_t *end = h->param.b_cabac ? h->cabac.p : h->out.bs.p;
-            for( ; last_emu_check < end - 2; last_emu_check++ )
-                if( last_emu_check[0] == 0 && last_emu_check[1] == 0 && last_emu_check[2] <= 3 )
-                {
-                    slice_max_size -= 8;
-                    last_emu_check++;
-                }
-            /* We'll just re-encode this last macroblock if we go over the max slice size. */
-            if( total_bits - starting_bits > slice_max_size && !h->mb.b_reencode_mb )
-            {
-                if( !x264_frame_new_slice( h, h->fdec ) )
-                {
-                    /* Handle the most obnoxious slice-min-mbs edge case: we need to end the slice
-                     * because it's gone over the maximum size, but doing so would violate slice-min-mbs.
-                     * If possible, roll back to the last checkpoint and try again.
-                     * We could try raising QP, but that would break in the case where a slice spans multiple
-                     * rows, which the re-encoding infrastructure can't currently handle. */
-                    if( mb_xy <= thread_last_mb && (thread_last_mb+1-mb_xy) < h->param.i_slice_min_mbs )
-                    {
-                        if( thread_last_mb-h->param.i_slice_min_mbs < h->sh.i_first_mb+h->param.i_slice_min_mbs )
-                        {
-                            x264_log( h, X264_LOG_WARNING, "slice-max-size violated (frame %d, cause: slice-min-mbs)\n", h->i_frame );
-                            slice_max_size = 0;
-                            goto cont;
-                        }
-                        x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], &i_skip, 0 );
-                        h->mb.b_reencode_mb = 1;
-                        h->sh.i_last_mb = thread_last_mb-h->param.i_slice_min_mbs;
-                        break;
-                    }
-                    if( mb_xy-SLICE_MBAFF*h->mb.i_mb_stride != h->sh.i_first_mb )
-                    {
-                        x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], &i_skip, 0 );
-                        h->mb.b_reencode_mb = 1;
-                        if( SLICE_MBAFF )
-                        {
-                            // set to bottom of previous mbpair
-                            if( i_mb_x )
-                                h->sh.i_last_mb = mb_xy-1+h->mb.i_mb_stride*(!(i_mb_y&1));
-                            else
-                                h->sh.i_last_mb = (i_mb_y-2+!(i_mb_y&1))*h->mb.i_mb_stride + h->mb.i_mb_width - 1;
-                        }
-                        else
-                            h->sh.i_last_mb = mb_xy-1;
-                        break;
-                    }
-                    else
-                        h->sh.i_last_mb = mb_xy;
-                }
-                else
-                    slice_max_size = 0;
-            }
-        }
-cont:
-        h->mb.b_reencode_mb = 0;
+			if( slice_max_size && (!SLICE_MBAFF || (i_mb_y&1)) )
+			{
+				/* Count the skip run, just in case. */
+				if( !h->param.b_cabac )
+					total_bits += bs_size_ue_big( i_skip );
+				/* Check for escape bytes. */
+				uint8_t *end = h->param.b_cabac ? h->cabac.p : h->out.bs.p;
+				for( ; last_emu_check < end - 2; last_emu_check++ )
+					if( last_emu_check[0] == 0 && last_emu_check[1] == 0 && last_emu_check[2] <= 3 )
+					{
+						slice_max_size -= 8;
+						last_emu_check++;
+					}
+				/* We'll just re-encode this last macroblock if we go over the max slice size. */
+				if( total_bits - starting_bits > slice_max_size && !h->mb.b_reencode_mb )
+				{
+					if( !x264_frame_new_slice( h, h->fdec ) )
+					{
+						/* Handle the most obnoxious slice-min-mbs edge case: we need to end the slice
+						 * because it's gone over the maximum size, but doing so would violate slice-min-mbs.
+						 * If possible, roll back to the last checkpoint and try again.
+						 * We could try raising QP, but that would break in the case where a slice spans multiple
+						 * rows, which the re-encoding infrastructure can't currently handle. */
+						if( mb_xy <= thread_last_mb && (thread_last_mb+1-mb_xy) < h->param.i_slice_min_mbs )
+						{
+							if( thread_last_mb-h->param.i_slice_min_mbs < h->sh.i_first_mb+h->param.i_slice_min_mbs )
+							{
+								x264_log( h, X264_LOG_WARNING, "slice-max-size violated (frame %d, cause: slice-min-mbs)\n", h->i_frame );
+								slice_max_size = 0;
+								goto cont_P;
+							}
+							x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], &i_skip, 0 );
+							h->mb.b_reencode_mb = 1;
+							h->sh.i_last_mb = thread_last_mb-h->param.i_slice_min_mbs;
+							break;
+						}
+						if( mb_xy-SLICE_MBAFF*h->mb.i_mb_stride != h->sh.i_first_mb )
+						{
+							x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], &i_skip, 0 );
+							h->mb.b_reencode_mb = 1;
+							if( SLICE_MBAFF )
+							{
+								// set to bottom of previous mbpair
+								if( i_mb_x )
+									h->sh.i_last_mb = mb_xy-1+h->mb.i_mb_stride*(!(i_mb_y&1));
+								else
+									h->sh.i_last_mb = (i_mb_y-2+!(i_mb_y&1))*h->mb.i_mb_stride + h->mb.i_mb_width - 1;
+							}
+							else
+								h->sh.i_last_mb = mb_xy-1;
+							break;
+						}
+						else
+							h->sh.i_last_mb = mb_xy;
+					}
+					else
+						slice_max_size = 0;
+				}
+			}
+	cont_P:
+			h->mb.b_reencode_mb = 0;
 
-        /* save cache */
-        x264_macroblock_cache_save( h );
+			/* save cache */
+			x264_macroblock_cache_save( h );
 
-        if( x264_ratecontrol_mb( h, mb_size ) < 0 )
-        {
-            x264_bitstream_restore( h, &bs_bak[BS_BAK_ROW_VBV], &i_skip, 1 );
-            h->mb.b_reencode_mb = 1;
-            i_mb_x = 0;
-            i_mb_y = i_mb_y - SLICE_MBAFF;
-            h->mb.i_mb_prev_xy = i_mb_y * h->mb.i_mb_stride - 1;
-            h->sh.i_last_mb = orig_last_mb;
-            continue;
-        }
+			if( x264_ratecontrol_mb( h, mb_size ) < 0 )
+			{
+				x264_bitstream_restore( h, &bs_bak[BS_BAK_ROW_VBV], &i_skip, 1 );
+				h->mb.b_reencode_mb = 1;
+				i_mb_x = 0;
+				i_mb_y = i_mb_y - SLICE_MBAFF;
+				h->mb.i_mb_prev_xy = i_mb_y * h->mb.i_mb_stride - 1;
+				h->sh.i_last_mb = orig_last_mb;
+				continue;
+			}
 
-        /* accumulate mb stats */
-        h->stat.frame.i_mb_count[h->mb.i_type]++;
+			/* accumulate mb stats */
+			h->stat.frame.i_mb_count[h->mb.i_type]++;
 
-        int b_intra = IS_INTRA( h->mb.i_type );
-        int b_skip = IS_SKIP( h->mb.i_type );
-        if( h->param.i_log_level >= X264_LOG_INFO || h->param.rc.b_stat_write )
-        {
-            if( !b_intra && !b_skip && !IS_DIRECT( h->mb.i_type ) )
-            {
-                if( h->mb.i_partition != D_8x8 )
-                        h->stat.frame.i_mb_partition[h->mb.i_partition] += 4;
-                    else
-                        for( int i = 0; i < 4; i++ )
-                            h->stat.frame.i_mb_partition[h->mb.i_sub_partition[i]] ++;
-                if( h->param.i_frame_reference > 1 )
-                    for( int i_list = 0; i_list <= (h->sh.i_type == SLICE_TYPE_B); i_list++ )
-                        for( int i = 0; i < 4; i++ )
-                        {
-                            int i_ref = h->mb.cache.ref[i_list][ x264_scan8[4*i] ];
-                            if( i_ref >= 0 )
-                                h->stat.frame.i_mb_count_ref[i_list][i_ref] ++;
-                        }
-            }
-        }
+			int b_intra = IS_INTRA( h->mb.i_type );
+			int b_skip = IS_SKIP( h->mb.i_type );
+			if( h->param.i_log_level >= X264_LOG_INFO || h->param.rc.b_stat_write )
+			{
+				if( !b_intra && !b_skip && !IS_DIRECT( h->mb.i_type ) )
+				{
+					if( h->mb.i_partition != D_8x8 )
+							h->stat.frame.i_mb_partition[h->mb.i_partition] += 4;
+						else
+							for( int i = 0; i < 4; i++ )
+								h->stat.frame.i_mb_partition[h->mb.i_sub_partition[i]] ++;
+					if( h->param.i_frame_reference > 1 )
+						for( int i_list = 0; i_list <= (h->sh.i_type == SLICE_TYPE_B); i_list++ )
+							for( int i = 0; i < 4; i++ )
+							{
+								int i_ref = h->mb.cache.ref[i_list][ x264_scan8[4*i] ];
+								if( i_ref >= 0 )
+									h->stat.frame.i_mb_count_ref[i_list][i_ref] ++;
+							}
+				}
+			}
 
-        if( h->param.i_log_level >= X264_LOG_INFO )
-        {
-            if( h->mb.i_cbp_luma | h->mb.i_cbp_chroma )
-            {
-                if( CHROMA444 )
-                {
-                    for( int i = 0; i < 4; i++ )
-                        if( h->mb.i_cbp_luma & (1 << i) )
-                            for( int p = 0; p < 3; p++ )
-                            {
-                                int s8 = i*4+p*16;
-                                int nnz8x8 = M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+0] )
-                                           | M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+8] );
-                                h->stat.frame.i_mb_cbp[!b_intra + p*2] += !!nnz8x8;
-                            }
-                }
-                else
-                {
-                    int cbpsum = (h->mb.i_cbp_luma&1) + ((h->mb.i_cbp_luma>>1)&1)
-                               + ((h->mb.i_cbp_luma>>2)&1) + (h->mb.i_cbp_luma>>3);
-                    h->stat.frame.i_mb_cbp[!b_intra + 0] += cbpsum;
-                    h->stat.frame.i_mb_cbp[!b_intra + 2] += !!h->mb.i_cbp_chroma;
-                    h->stat.frame.i_mb_cbp[!b_intra + 4] += h->mb.i_cbp_chroma >> 1;
-                }
-            }
-            if( h->mb.i_cbp_luma && !b_intra )
-            {
-                h->stat.frame.i_mb_count_8x8dct[0] ++;
-                h->stat.frame.i_mb_count_8x8dct[1] += h->mb.b_transform_8x8;
-            }
-            if( b_intra && h->mb.i_type != I_PCM )
-            {
-                if( h->mb.i_type == I_16x16 )
-                    h->stat.frame.i_mb_pred_mode[0][h->mb.i_intra16x16_pred_mode]++;
-                else if( h->mb.i_type == I_8x8 )
-                    for( int i = 0; i < 16; i += 4 )
-                        h->stat.frame.i_mb_pred_mode[1][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
-                else //if( h->mb.i_type == I_4x4 )
-                    for( int i = 0; i < 16; i++ )
-                        h->stat.frame.i_mb_pred_mode[2][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
-                h->stat.frame.i_mb_pred_mode[3][x264_mb_chroma_pred_mode_fix[h->mb.i_chroma_pred_mode]]++;
-            }
-            h->stat.frame.i_mb_field[b_intra?0:b_skip?2:1] += MB_INTERLACED;
-        }
+			if( h->param.i_log_level >= X264_LOG_INFO )
+			{
+				if( h->mb.i_cbp_luma | h->mb.i_cbp_chroma )
+				{
+					if( CHROMA444 )
+					{
+						for( int i = 0; i < 4; i++ )
+							if( h->mb.i_cbp_luma & (1 << i) )
+								for( int p = 0; p < 3; p++ )
+								{
+									int s8 = i*4+p*16;
+									int nnz8x8 = M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+0] )
+											   | M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+8] );
+									h->stat.frame.i_mb_cbp[!b_intra + p*2] += !!nnz8x8;
+								}
+					}
+					else
+					{
+						int cbpsum = (h->mb.i_cbp_luma&1) + ((h->mb.i_cbp_luma>>1)&1)
+								   + ((h->mb.i_cbp_luma>>2)&1) + (h->mb.i_cbp_luma>>3);
+						h->stat.frame.i_mb_cbp[!b_intra + 0] += cbpsum;
+						h->stat.frame.i_mb_cbp[!b_intra + 2] += !!h->mb.i_cbp_chroma;
+						h->stat.frame.i_mb_cbp[!b_intra + 4] += h->mb.i_cbp_chroma >> 1;
+					}
+				}
+				if( h->mb.i_cbp_luma && !b_intra )
+				{
+					h->stat.frame.i_mb_count_8x8dct[0] ++;
+					h->stat.frame.i_mb_count_8x8dct[1] += h->mb.b_transform_8x8;
+				}
+				if( b_intra && h->mb.i_type != I_PCM )
+				{
+					if( h->mb.i_type == I_16x16 )
+						h->stat.frame.i_mb_pred_mode[0][h->mb.i_intra16x16_pred_mode]++;
+					else if( h->mb.i_type == I_8x8 )
+						for( int i = 0; i < 16; i += 4 )
+							h->stat.frame.i_mb_pred_mode[1][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
+					else //if( h->mb.i_type == I_4x4 )
+						for( int i = 0; i < 16; i++ )
+							h->stat.frame.i_mb_pred_mode[2][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
+					h->stat.frame.i_mb_pred_mode[3][x264_mb_chroma_pred_mode_fix[h->mb.i_chroma_pred_mode]]++;
+				}
+				h->stat.frame.i_mb_field[b_intra?0:b_skip?2:1] += MB_INTERLACED;
+			}
 
-        /* calculate deblock strength values (actual deblocking is done per-row along with hpel) */
-        if( b_deblock )
-            x264_macroblock_deblock_strength( h );
+			/* calculate deblock strength values (actual deblocking is done per-row along with hpel) */
+			if( b_deblock )
+				x264_macroblock_deblock_strength( h );
 
-        if( mb_xy == h->sh.i_last_mb )
-            break;
+			if( mb_xy == h->sh.i_last_mb )
+				break;
 
-        if( SLICE_MBAFF )
-        {
-            i_mb_x += i_mb_y & 1;
-            i_mb_y ^= i_mb_x < h->mb.i_mb_width;
-        }
-        else
-            i_mb_x++;
-        if( i_mb_x == h->mb.i_mb_width )
-        {
-            i_mb_y++;
-            i_mb_x = 0;
-        }
+			if( SLICE_MBAFF )
+			{
+				i_mb_x += i_mb_y & 1;
+				i_mb_y ^= i_mb_x < h->mb.i_mb_width;
+			}
+			else
+				i_mb_x++;
+			if( i_mb_x == h->mb.i_mb_width )
+			{
+				i_mb_y++;
+				i_mb_x = 0;
+			}
+		}
+    }
+    else
+    {
+		while( 1 )
+		{
+			mb_xy = i_mb_x + i_mb_y * h->mb.i_mb_width;
+			int mb_spos = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
+
+			if( i_mb_x == 0 )
+			{
+				if( x264_bitstream_check_buffer( h ) )
+					return -1;
+				if( !(i_mb_y & SLICE_MBAFF) && h->param.rc.i_vbv_buffer_size )
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_ROW_VBV], i_skip, 1 );
+				if( !h->mb.b_reencode_mb )
+					x264_fdec_filter_row( h, i_mb_y, 0 );
+			}
+
+			if( back_up_bitstream )
+			{
+				if( back_up_bitstream_cavlc )
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], i_skip, 0 );
+				if( slice_max_size && !(i_mb_y & SLICE_MBAFF) )
+				{
+					x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], i_skip, 0 );
+					if( (thread_last_mb+1-mb_xy) == h->param.i_slice_min_mbs )
+						x264_bitstream_backup( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], i_skip, 0 );
+				}
+			}
+
+			if( PARAM_INTERLACED )
+			{
+				if( h->mb.b_adaptive_mbaff )
+				{
+					if( !(i_mb_y&1) )
+					{
+						/* FIXME: VSAD is fast but fairly poor at choosing the best interlace type. */
+						h->mb.b_interlaced = x264_field_vsad( h, i_mb_x, i_mb_y );
+						memcpy( &h->zigzagf, MB_INTERLACED ? &h->zigzagf_interlaced : &h->zigzagf_progressive, sizeof(h->zigzagf) );
+						if( !MB_INTERLACED && (i_mb_y+2) == h->mb.i_mb_height )
+							x264_expand_border_mbpair( h, i_mb_x, i_mb_y );
+					}
+				}
+				h->mb.field[mb_xy] = MB_INTERLACED;
+			}
+
+			/* load cache */
+			if( SLICE_MBAFF )
+				x264_macroblock_cache_load_interlaced( h, i_mb_x, i_mb_y );
+			else
+				x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );
+
+			x264_macroblock_analyse( h );
+
+			/* encode this macroblock -> be careful it can change the mb type to P_SKIP if needed */
+	reencode:
+			x264_macroblock_encode( h );
+
+			if( h->param.b_cabac )
+			{
+				if( mb_xy > h->sh.i_first_mb && !(SLICE_MBAFF && (i_mb_y&1)) )
+					x264_cabac_encode_terminal( &h->cabac );
+
+				if( IS_SKIP( h->mb.i_type ) )
+					x264_cabac_mb_skip( h, 1 );
+				else
+				{
+					if( h->sh.i_type != SLICE_TYPE_I )
+						x264_cabac_mb_skip( h, 0 );
+					x264_macroblock_write_cabac( h, &h->cabac );
+				}
+			}
+			else
+			{
+				if( IS_SKIP( h->mb.i_type ) )
+					i_skip++;
+				else
+				{
+					if( h->sh.i_type != SLICE_TYPE_I )
+					{
+						bs_write_ue( &h->out.bs, i_skip );  /* skip run */
+						i_skip = 0;
+					}
+					x264_macroblock_write_cavlc( h );
+					/* If there was a CAVLC level code overflow, try again at a higher QP. */
+					if( h->mb.b_overflow )
+					{
+						h->mb.i_chroma_qp = h->chroma_qp_table[++h->mb.i_qp];
+						h->mb.i_skip_intra = 0;
+						h->mb.b_skip_mc = 0;
+						h->mb.b_overflow = 0;
+						x264_bitstream_restore( h, &bs_bak[BS_BAK_CAVLC_OVERFLOW], &i_skip, 0 );
+						goto reencode;
+					}
+				}
+			}
+
+			int total_bits = bs_pos(&h->out.bs) + x264_cabac_pos(&h->cabac);
+			int mb_size = total_bits - mb_spos;
+
+			if( slice_max_size && (!SLICE_MBAFF || (i_mb_y&1)) )
+			{
+				/* Count the skip run, just in case. */
+				if( !h->param.b_cabac )
+					total_bits += bs_size_ue_big( i_skip );
+				/* Check for escape bytes. */
+				uint8_t *end = h->param.b_cabac ? h->cabac.p : h->out.bs.p;
+				for( ; last_emu_check < end - 2; last_emu_check++ )
+					if( last_emu_check[0] == 0 && last_emu_check[1] == 0 && last_emu_check[2] <= 3 )
+					{
+						slice_max_size -= 8;
+						last_emu_check++;
+					}
+				/* We'll just re-encode this last macroblock if we go over the max slice size. */
+				if( total_bits - starting_bits > slice_max_size && !h->mb.b_reencode_mb )
+				{
+					if( !x264_frame_new_slice( h, h->fdec ) )
+					{
+						/* Handle the most obnoxious slice-min-mbs edge case: we need to end the slice
+						 * because it's gone over the maximum size, but doing so would violate slice-min-mbs.
+						 * If possible, roll back to the last checkpoint and try again.
+						 * We could try raising QP, but that would break in the case where a slice spans multiple
+						 * rows, which the re-encoding infrastructure can't currently handle. */
+						if( mb_xy <= thread_last_mb && (thread_last_mb+1-mb_xy) < h->param.i_slice_min_mbs )
+						{
+							if( thread_last_mb-h->param.i_slice_min_mbs < h->sh.i_first_mb+h->param.i_slice_min_mbs )
+							{
+								x264_log( h, X264_LOG_WARNING, "slice-max-size violated (frame %d, cause: slice-min-mbs)\n", h->i_frame );
+								slice_max_size = 0;
+								goto cont;
+							}
+							x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MIN_MBS], &i_skip, 0 );
+							h->mb.b_reencode_mb = 1;
+							h->sh.i_last_mb = thread_last_mb-h->param.i_slice_min_mbs;
+							break;
+						}
+						if( mb_xy-SLICE_MBAFF*h->mb.i_mb_stride != h->sh.i_first_mb )
+						{
+							x264_bitstream_restore( h, &bs_bak[BS_BAK_SLICE_MAX_SIZE], &i_skip, 0 );
+							h->mb.b_reencode_mb = 1;
+							if( SLICE_MBAFF )
+							{
+								// set to bottom of previous mbpair
+								if( i_mb_x )
+									h->sh.i_last_mb = mb_xy-1+h->mb.i_mb_stride*(!(i_mb_y&1));
+								else
+									h->sh.i_last_mb = (i_mb_y-2+!(i_mb_y&1))*h->mb.i_mb_stride + h->mb.i_mb_width - 1;
+							}
+							else
+								h->sh.i_last_mb = mb_xy-1;
+							break;
+						}
+						else
+							h->sh.i_last_mb = mb_xy;
+					}
+					else
+						slice_max_size = 0;
+				}
+			}
+	cont:
+			h->mb.b_reencode_mb = 0;
+
+			/* save cache */
+			x264_macroblock_cache_save( h );
+
+			if( x264_ratecontrol_mb( h, mb_size ) < 0 )
+			{
+				x264_bitstream_restore( h, &bs_bak[BS_BAK_ROW_VBV], &i_skip, 1 );
+				h->mb.b_reencode_mb = 1;
+				i_mb_x = 0;
+				i_mb_y = i_mb_y - SLICE_MBAFF;
+				h->mb.i_mb_prev_xy = i_mb_y * h->mb.i_mb_stride - 1;
+				h->sh.i_last_mb = orig_last_mb;
+				continue;
+			}
+
+			/* accumulate mb stats */
+			h->stat.frame.i_mb_count[h->mb.i_type]++;
+
+			int b_intra = IS_INTRA( h->mb.i_type );
+			int b_skip = IS_SKIP( h->mb.i_type );
+			if( h->param.i_log_level >= X264_LOG_INFO || h->param.rc.b_stat_write )
+			{
+				if( !b_intra && !b_skip && !IS_DIRECT( h->mb.i_type ) )
+				{
+					if( h->mb.i_partition != D_8x8 )
+							h->stat.frame.i_mb_partition[h->mb.i_partition] += 4;
+						else
+							for( int i = 0; i < 4; i++ )
+								h->stat.frame.i_mb_partition[h->mb.i_sub_partition[i]] ++;
+					if( h->param.i_frame_reference > 1 )
+						for( int i_list = 0; i_list <= (h->sh.i_type == SLICE_TYPE_B); i_list++ )
+							for( int i = 0; i < 4; i++ )
+							{
+								int i_ref = h->mb.cache.ref[i_list][ x264_scan8[4*i] ];
+								if( i_ref >= 0 )
+									h->stat.frame.i_mb_count_ref[i_list][i_ref] ++;
+							}
+				}
+			}
+
+			if( h->param.i_log_level >= X264_LOG_INFO )
+			{
+				if( h->mb.i_cbp_luma | h->mb.i_cbp_chroma )
+				{
+					if( CHROMA444 )
+					{
+						for( int i = 0; i < 4; i++ )
+							if( h->mb.i_cbp_luma & (1 << i) )
+								for( int p = 0; p < 3; p++ )
+								{
+									int s8 = i*4+p*16;
+									int nnz8x8 = M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+0] )
+											   | M16( &h->mb.cache.non_zero_count[x264_scan8[s8]+8] );
+									h->stat.frame.i_mb_cbp[!b_intra + p*2] += !!nnz8x8;
+								}
+					}
+					else
+					{
+						int cbpsum = (h->mb.i_cbp_luma&1) + ((h->mb.i_cbp_luma>>1)&1)
+								   + ((h->mb.i_cbp_luma>>2)&1) + (h->mb.i_cbp_luma>>3);
+						h->stat.frame.i_mb_cbp[!b_intra + 0] += cbpsum;
+						h->stat.frame.i_mb_cbp[!b_intra + 2] += !!h->mb.i_cbp_chroma;
+						h->stat.frame.i_mb_cbp[!b_intra + 4] += h->mb.i_cbp_chroma >> 1;
+					}
+				}
+				if( h->mb.i_cbp_luma && !b_intra )
+				{
+					h->stat.frame.i_mb_count_8x8dct[0] ++;
+					h->stat.frame.i_mb_count_8x8dct[1] += h->mb.b_transform_8x8;
+				}
+				if( b_intra && h->mb.i_type != I_PCM )
+				{
+					if( h->mb.i_type == I_16x16 )
+						h->stat.frame.i_mb_pred_mode[0][h->mb.i_intra16x16_pred_mode]++;
+					else if( h->mb.i_type == I_8x8 )
+						for( int i = 0; i < 16; i += 4 )
+							h->stat.frame.i_mb_pred_mode[1][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
+					else //if( h->mb.i_type == I_4x4 )
+						for( int i = 0; i < 16; i++ )
+							h->stat.frame.i_mb_pred_mode[2][h->mb.cache.intra4x4_pred_mode[x264_scan8[i]]]++;
+					h->stat.frame.i_mb_pred_mode[3][x264_mb_chroma_pred_mode_fix[h->mb.i_chroma_pred_mode]]++;
+				}
+				h->stat.frame.i_mb_field[b_intra?0:b_skip?2:1] += MB_INTERLACED;
+			}
+
+			/* calculate deblock strength values (actual deblocking is done per-row along with hpel) */
+			if( b_deblock )
+				x264_macroblock_deblock_strength( h );
+
+			if( mb_xy == h->sh.i_last_mb )
+				break;
+
+			if( SLICE_MBAFF )
+			{
+				i_mb_x += i_mb_y & 1;
+				i_mb_y ^= i_mb_x < h->mb.i_mb_width;
+			}
+			else
+				i_mb_x++;
+			if( i_mb_x == h->mb.i_mb_width )
+			{
+				i_mb_y++;
+				i_mb_x = 0;
+			}
+		}
     }
     if( h->sh.i_last_mb < h->sh.i_first_mb )
         return 0;
@@ -3197,7 +3473,7 @@ int x264_encoder_invalidate_reference( x264_t *h, int64_t pts )
 
 /****************************************************************************
  * x264_encoder_encode:
- *  XXX: i_poc   : is the poc of the current given picture
+ *  XXX: i_poc   : is the poc(picture order count) of the current given picture
  *       i_frame : is the number of the frame being coded
  *  ex:  type frame poc
  *       I      0   2*0
@@ -3340,6 +3616,9 @@ int     x264_encoder_encode( x264_t *h,
     /* ------------------- Get frame to be encoded ------------------------- */
     /* 4: get picture to encode */
     h->fenc = x264_frame_shift( h->frames.current );
+
+    //For Debug: added by Wenchy 2016-03-04
+    //save_frame(h);
 
     /* If applicable, wait for previous frame reconstruction to finish */
     if( h->param.b_sliced_threads )
@@ -3749,7 +4028,6 @@ int     x264_encoder_encode( x264_t *h,
     else
         if( (intptr_t)x264_slices_write( h ) )
             return -1;
-
     return x264_encoder_frame_end( thread_oldest, thread_current, pp_nal, pi_nal, pic_out );
 }
 

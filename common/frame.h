@@ -138,10 +138,10 @@ typedef struct x264_frame
     uint32_t i_pixel_sum[3];
     uint64_t i_pixel_ssd[3];
 
-    /* hrd */
+    /* hrd (Hypothetical Reference Decoder) */
     x264_hrd_t hrd_timing;
 
-    /* vbv */
+    /* vbv (Video Buffering Verifier) */
     uint8_t i_planned_type[X264_LOOKAHEAD_MAX+1];
     int i_planned_satd[X264_LOOKAHEAD_MAX+1];
     double f_planned_cpb_duration[X264_LOOKAHEAD_MAX+1];
@@ -165,7 +165,7 @@ typedef struct x264_frame
     /* interactive encoder control */
     int     b_corrupt;
 
-    /* user sei */
+    /* user sei (Supplemental Enhancement Information) */
     x264_sei_t extra_sei;
 
     /* user data */

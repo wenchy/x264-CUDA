@@ -1375,6 +1375,10 @@ static void x264_mb_analyse_inter_p16x16( x264_t *h, x264_mb_analysis_t *a )
 
     /* 16x16 Search on all ref frame */
     m.i_pixel = PIXEL_16x16;
+    // init:
+    // m.p_cost_mv 	(uint16_t *)
+    // m.i_stride 	(int[3])
+    // m.p_fenc 	(pixel *)
     LOAD_FENC( &m, h->mb.pic.p_fenc, 0, 0 );
 
     a->l0.me16x16.cost = INT_MAX;
@@ -1384,11 +1388,22 @@ static void x264_mb_analyse_inter_p16x16( x264_t *h, x264_mb_analysis_t *a )
         i_halfpel_thresh -= m.i_ref_cost;
 
         /* search with ref */
+        // init:
+        // m.p_fref_w 	(pixel *)
+        // m.p_fref		((pixel *)[12])
+        // m.integral	(uint16_t *)
+        // m.weight		(const x264_weight_t *)
+        // m.i_ref		(int)
         LOAD_HPELS( &m, h->mb.pic.p_fref[0][i_ref], 0, i_ref, 0, 0 );
+        // update:
+        // m.p_fref_w
+        // m.weight
         LOAD_WPELS( &m, h->mb.pic.p_fref_w[i_ref], 0, i_ref, 0, 0 );
 
+        // init:
+        // m.mvp (int16_t[2])
         x264_mb_predict_mv_16x16( h, 0, i_ref, m.mvp );
-
+        // [--weightp 0] => h->mb.ref_blind_dupe = -1
         if( h->mb.ref_blind_dupe == i_ref )
         {
             CP32( m.mv, a->l0.mvc[0][0] );
@@ -3032,6 +3047,8 @@ static inline void x264_mb_analyse_qp_rd( x264_t *h, x264_mb_analysis_t *a )
  *****************************************************************************/
 void x264_macroblock_analyse( x264_t *h )
 {
+	// added by Wenchy
+	// printf("%3d   %3d\n", h->mb.i_mb_xy, h->mb.i_mb_width);
     x264_mb_analysis_t analysis;
     int i_cost = COST_MAX;
 
@@ -3067,6 +3084,9 @@ intra_analysis:
     }
     else if( h->sh.i_type == SLICE_TYPE_P )
     {
+    	//For Debug: added by Wenchy 2016-03-04
+    	//save_frame(h);
+
         int b_skip = 0;
 
         h->mc.prefetch_ref( h->mb.pic.p_fref[0][0][h->mb.i_mb_x&3], h->mb.pic.i_stride[0], 0 );

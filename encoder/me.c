@@ -28,6 +28,7 @@
 #include "common/common.h"
 #include "macroblock.h"
 #include "me.h"
+// #include "common/cuda/x264-cuda.h"
 
 /* presets selected from good points on the speed-vs-quality curve of several test videos
  * subpel_iters[i_subpel_refine] = { refine_hpel, refine_qpel, me_hpel, me_qpel }
@@ -319,6 +320,68 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
 
     switch( h->mb.i_me_method )
     {
+        // added by Wenchy 2016-03-09: for ESA on CUDA
+        case X264_ME_CUDA_ESA:
+        {
+            /* ESA(exhaustive search algorithm) on CUDA*/
+#ifdef HAVE_CUDA
+        	if(bw == 16 && bh == 16)
+        	{
+        		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
+				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
+				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
+				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
+
+        		x264_cuda_t cuda;
+        		cuda.i_me_range = i_me_range;
+				cuda.i_mb_x = h->mb.i_mb_x;
+				cuda.i_mb_y = h->mb.i_mb_y;
+				cuda.bw = bw;
+				cuda.bh = bh;
+
+				cuda.mv_min_x = min_x;
+				cuda.mv_min_y = min_y;
+				cuda.mv_max_x = max_x;
+				cuda.mv_max_y = max_y;
+
+				cuda.fref_buf = h->fref[0][0]->buffer[0];
+				cuda.mb_enc = h->mb.pic.p_fenc[0];
+				cuda.stride_ref = h->fref[0][0]->i_stride[0];
+
+				cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
+				cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
+
+				cuda_me( &cuda, &bmx, &bmy, &bcost );
+        	}
+        	else
+        	{
+        		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
+				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
+				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
+				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
+				/* SEA is fastest in multiples of 4 */
+				const int width = (max_x - min_x + 3) & ~3;
+
+				/* plain old exhaustive search */
+				for( int my = min_y; my <= max_y; my++ )
+					for( int mx = min_x; mx < min_x + width; mx++ )
+						COST_MV( mx, my );
+        	}
+#else
+            const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
+            const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
+            const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
+            const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
+            /* SEA is fastest in multiples of 4 */
+            const int width = (max_x - min_x + 3) & ~3;
+
+            /* plain old exhaustive search */
+            for( int my = min_y; my <= max_y; my++ )
+                for( int mx = min_x; mx < min_x + width; mx++ )
+                    COST_MV( mx, my );
+#endif
+            break;
+        }
         case X264_ME_DIA:
         {
             /* diamond search, radius 1 */
@@ -775,6 +838,8 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
     /* -> qpel mv */
     uint32_t bmv = pack16to32_mask(bmx,bmy);
     uint32_t bmv_spel = SPELx2(bmv);
+    //if(h->mb.i_subpel_refine != 1) printf("%d, ", h->mb.i_subpel_refine);
+    //if(h->mb.i_subpel_refine != 1) fprintf( stderr, "%d_%dth_frame, ", h->mb.i_subpel_refine, h->fenc->i_frame);
     if( h->mb.i_subpel_refine < 3 )
     {
         m->cost_mv = p_cost_mvx[bmx<<2] + p_cost_mvy[bmy<<2];

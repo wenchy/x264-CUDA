@@ -180,6 +180,8 @@ typedef struct x264_nal_t
 #define X264_ME_UMH                  2
 #define X264_ME_ESA                  3
 #define X264_ME_TESA                 4
+// added by Wenchy 2016-03-09                                 
+#define X264_ME_CUDA_ESA             5            
 #define X264_CQM_FLAT                0
 #define X264_CQM_JVT                 1
 #define X264_CQM_CUSTOM              2
@@ -204,7 +206,8 @@ typedef struct x264_nal_t
 #define X264_KEYINT_MAX_INFINITE     (1<<30)
 
 static const char * const x264_direct_pred_names[] = { "none", "spatial", "temporal", "auto", 0 };
-static const char * const x264_motion_est_names[] = { "dia", "hex", "umh", "esa", "tesa", 0 };
+// modified by Wenchy 2016-03-09: add "cuda_esa" me type
+static const char * const x264_motion_est_names[] = { "dia", "hex", "umh", "esa", "tesa", "cuda_esa", 0 };
 static const char * const x264_b_pyramid_names[] = { "none", "strict", "normal", 0 };
 static const char * const x264_overscan_names[] = { "undef", "show", "crop", 0 };
 static const char * const x264_vidformat_names[] = { "component", "pal", "ntsc", "secam", "mac", "undef", 0 };
