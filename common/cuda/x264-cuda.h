@@ -15,26 +15,39 @@ typedef long int intptr_t;
 typedef struct x264_cuda_t
 {
 	int i_me_range;
+
 	int i_mb_x;
 	int i_mb_y;
+
 	int i_mb_width;
 	int i_mb_height;
+
 	int bw;
 	int bh;
+
 	int mv_min_x;
 	int mv_min_y;
 	int mv_max_x;
 	int mv_max_y;
 
-	pixel *mb_enc;
-
+	pixel *fenc_buf;
 	pixel *fref_buf;
+
+	pixel *dev_fenc_buf;
 	pixel *dev_fref_buf;
-	int stride_ref;
+	int stride_buf;
 
 	uint16_t *p_cost_mvx;
 	uint16_t *p_cost_mvy;
 } x264_cuda_t;
+
+/* Motion Vector and Cost */
+typedef struct x264_mvc_t
+{
+	int mx;
+	int my;
+	int cost;
+} x264_mvc_t;
 
 #endif  // __X264_CUDA_COMMON_H__
 

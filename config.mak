@@ -9,7 +9,7 @@ SYS_ARCH=X86_64
 SYS=LINUX
 CC=gcc
 #CFLAGS= -Wno-maybe-uninitialized -Wshadow -O3 -ffast-math -m64  -Wall -I. -I$(SRCPATH) -std=gnu99 -mpreferred-stack-boundary=5 -fomit-frame-pointer -fno-tree-vectorize
-CFLAGS= -g -DHAVE_CUDA -Wno-maybe-uninitialized -Wshadow -O0 -ffast-math -m64  -Wall -I. -I$(SRCPATH) -std=gnu99 -mpreferred-stack-boundary=5 -fomit-frame-pointer -fno-tree-vectorize
+CFLAGS= -g -Wno-maybe-uninitialized -Wshadow -O0 -ffast-math -m64  -Wall -I. -I$(SRCPATH) -std=gnu99 -mpreferred-stack-boundary=5 -fomit-frame-pointer -fno-tree-vectorize
 COMPILER=GNU
 COMPILER_STYLE=GNU
 DEPMM=-MM -g0

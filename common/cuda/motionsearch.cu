@@ -1,10 +1,8 @@
 #include "x264-cuda.h"
 #include "motionsearch.h"
 
-__global__ void me( pixel *dev_mb_enc, pixel *dev_frame_ref, int *dev_result, int stride_ref , int mb_x, int mb_y, int bmx, int bmy);
-__device__ int pixel_sad_16x16( pixel *pix_enc, int stride_pix_enc, pixel *pix_ref, int stride_pix_ref );
-
-
+__global__ void me( pixel *dev_mb_enc, pixel *dev_fref_buf, int *dev_sads, x264_mvc_t *dev_mvc, int stride_ref , int mb_x, int mb_y, int bmx, int bmy);
+__global__ void cmp(int *dev_sads, x264_mvc_t *dev_mvc, int me_range);
 /****************************************************************************
  * cuda_pixel_sad_WxH
  ****************************************************************************/
@@ -38,19 +36,23 @@ CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x4,    4,  4 )
 extern "C" void cuda_me_init( x264_cuda_t *c) {
 	int mb_width = c->i_mb_width;
 	int mb_height = c->i_mb_height;
+	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fenc_buf), (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel) ) );
 	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fref_buf), (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel) ) );
 }
 
 extern "C" void cuda_me_end( x264_cuda_t *c) {
+	HANDLE_ERROR( cudaFree( c->dev_fenc_buf ) );
 	HANDLE_ERROR( cudaFree( c->dev_fref_buf ) );
 }
 
 extern "C" void cuda_me_fref_prefetch( x264_cuda_t *c) {
 	int mb_width = c->i_mb_width;
 	int mb_height = c->i_mb_height;
-	// copy 'fref_buf'  to the GPU memory c->dev_fref_buf
+	// copy 'fenc_buf' and 'fref_buf'  to the GPU memory
+	HANDLE_ERROR( cudaMemcpy( c->dev_fenc_buf, c->fenc_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
 	HANDLE_ERROR( cudaMemcpy( c->dev_fref_buf, c->fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
 }
+
 extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) {
 
 	int me_range = c->i_me_range;
@@ -59,111 +61,78 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 	int mb_x = c->i_mb_x;
 	int mb_y = c->i_mb_y;
 
-	//pixel *fref_buf = c->fref_buf;
-	pixel *mb_enc =  c->mb_enc;
-	// int mb_stride = 16;
+	int stride_buf = c->stride_buf;
 
-	int stride_ref = c->stride_ref;
+	pixel *dev_mb_enc;
+	int *dev_sads;
+	x264_mvc_t *mvc; // CUDA Unified Memory
 
-	const uint16_t *p_cost_mvx = c->p_cost_mvx;
-	const uint16_t *p_cost_mvy = c->p_cost_mvy;
-
-	pixel *dev_mb_enc;//, *dev_fref_buf;
-	int *dev_result;
-
-	int *result = (int *)malloc( me_range*3 * me_range*3 * sizeof(int) );
 	// allocate the memory on the GPU
 	HANDLE_ERROR( cudaMalloc( (void**)&dev_mb_enc, 16*16 * sizeof(pixel) ) );
-	//HANDLE_ERROR( cudaMalloc( (void**)&dev_fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel) ) );
-	HANDLE_ERROR( cudaMalloc( (void**)&dev_result,  me_range*3 * me_range*3 * sizeof(int) ) );
+	HANDLE_ERROR( cudaMalloc( (void**)&dev_sads, me_range*3 * me_range*3 * sizeof( int) ) );
+	// CUDA Unified Memory
+	HANDLE_ERROR( cudaMallocManaged( (void**)&mvc, sizeof( x264_mvc_t) ) );
 
-	// copy the arrays 'mb_enc' and 'fref_buf' to the GPU
-	HANDLE_ERROR( cudaMemcpy( dev_mb_enc, mb_enc, (16 * 16) * sizeof(pixel), cudaMemcpyHostToDevice ) );
-	//HANDLE_ERROR( cudaMemcpy( dev_fref_buf, fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
+	mvc->mx = *p_bmx;
+	mvc->my = *p_bmy;
+	mvc->cost = *p_bcost;
 
-	dim3 grid(16*3,16*3);
+	// copy the arrays 'mb_enc' to the GPU
+	//HANDLE_ERROR( cudaMemcpy( dev_mb_enc, mb_enc, (16 * 16) * sizeof(pixel), cudaMemcpyHostToDevice ) );
 
-	me<<<grid,1>>>( dev_mb_enc, c->dev_fref_buf, dev_result, stride_ref, mb_x, mb_y, *p_bmx, *p_bmy);
+	dim3 grid_sad(16*3,16*3);
+	me<<<grid_sad, 1>>>( c->dev_fenc_buf, c->dev_fref_buf, dev_sads, mvc, stride_buf, mb_x, mb_y, *p_bmx, *p_bmy);
 
+	dim3 grid_cmp(1, 1);
+	cmp<<<grid_cmp, 1>>>( dev_sads, mvc, me_range);
+	cudaDeviceSynchronize();
 
-	// copy the array 'dev_result' back from the GPU to the CPU
-	HANDLE_ERROR( cudaMemcpy( result, dev_result, me_range*3 * me_range*3 * sizeof(int), cudaMemcpyDeviceToHost ) );
-	int *p_result = result;
-//	for( int y = 0; y < 16*3*16*3; y++ )
-//	{
-//		printf("result[%d]: %d\n", y, p_result[y]);
-//	}
-	// process the results
-	for( int y = 0; y < me_range*3; y++ )
-	{
-		for( int x = 0; x < me_range*3; x++ )
-		{
-			int mx = x + (*p_bmx - me_range);
-			int my = y + (*p_bmy - me_range);
-//			if(mx < c->mv_min_x || mx > c->mv_max_x || my < c->mv_min_y || my > c->mv_max_y)
-//				continue;
-			//printf("S: y: %d	x: %d    result: %d\n", y, x, p_result[x]);
-			int cost =  p_result[x];// + (p_cost_mvx[(mx)<<2] + p_cost_mvy[(my)<<2]);
-			if((cost)<(*p_bcost))
-			{
-				(*p_bcost)=(cost);
-				(*p_bmx)=(mx);
-				(*p_bmy)=(my);
-			}
-			//printf("E: y: %d	x: %d    result: %d\n", y, x, p_result[x]);
-		}
-		p_result += me_range*3;
-	}
-//	printf("out bmx: %d\n", (*p_bmx));
-//	printf("out bmy: %d\n", (*p_bmy));
-//	printf("out bcost: %d\n", (*p_bcost));
-
-	// free the memory allocated on the CPU
-	free(result);
+	(*p_bcost)= mvc->cost;
+	(*p_bmx)= mvc->mx;
+	(*p_bmy)=mvc->my;
 
 	// free the memory allocated on the GPU
 	HANDLE_ERROR( cudaFree( dev_mb_enc ) );
-	//HANDLE_ERROR( cudaFree( dev_fref_buf ) );
-	HANDLE_ERROR( cudaFree( dev_result ) );
+	HANDLE_ERROR( cudaFree( dev_sads ) );
+	HANDLE_ERROR( cudaFree( mvc ) );
 
 	return;
 }
 
-__global__ void me( pixel *dev_mb_enc, pixel *dev_fref_buf, int *dev_result, int stride_ref , int mb_x, int mb_y, int bmx, int bmy) {
+__global__ void me( pixel *dev_fenc_buf, pixel *dev_fref_buf, int *dev_sads, x264_mvc_t *mvc, int stride_buf , int mb_x, int mb_y, int bmx, int bmy) {
 	// map from blockIdx to pixel position
-	pixel *p_fenc_plane = dev_fref_buf + stride_ref * PADV + PADH;
+	pixel *p_fenc_plane = dev_fenc_buf + stride_buf * PADV + PADH;
+	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
 	int x = blockIdx.x;
 	int y = blockIdx.y;
 	int offset = x + y * gridDim.x;
-	pixel *p_fref = p_fenc_plane + ( 16 * (mb_x - 1) + x ) +( 16 *  (mb_y - 1) + y )* stride_ref;
-	p_fref += bmx +bmy * stride_ref;
+	pixel *p_fenc = p_fenc_plane + ( 16 * mb_x + x ) +( 16 * mb_y + y )* stride_buf;
+	pixel *p_fref = p_fref_plane + ( 16 * (mb_x - 1) + x ) +( 16 *  (mb_y - 1) + y )* stride_buf;
+	p_fref += bmx +bmy * stride_buf;
 
-	dev_result[offset] = x264_cuda_pixel_sad_16x16(dev_mb_enc, 16, p_fref, stride_ref);
+	dev_sads[offset] = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
 }
 
-//__global__ void cost_cmp( int *dev_result) {
-//	// map from blockIdx to pixel position
-//	int x = blockIdx.x;
-//	int y = blockIdx.y;
-//	int offset = x + y * gridDim.x;
-//	dev_result[offset]
-//}
-
-/* One thread performs 16x16 SAD */
-__device__ int pixel_sad_16x16( pixel *pix_enc, int stride_pix_enc,
-					 pixel *pix_ref, int stride_pix_ref )
-{
-	int cost = 0;
-	for( int y = 0; y < 16; y++ )
+__global__ void cmp(int *dev_sads, x264_mvc_t *mvc, int me_range){
+	// map from blockIdx to pixel position
+	int bmx = mvc->mx;
+	int bmy = mvc->my;
+	int *p_sad = dev_sads;
+	for( int y = 0; y < me_range*3; y++ )
 	{
-		for( int x = 0; x < 16; x++ )
+		for( int x = 0; x < me_range*3; x++ )
 		{
-			cost += abs( pix_enc[x] - pix_ref[x] );
+			int mx = x + (bmx - me_range);
+			int my = y + (bmy - me_range);
+			int cost =  p_sad[x];
+			if((cost)<(mvc->cost))
+			{
+				mvc->cost = cost;
+				mvc->mx = mx;
+				mvc->my = my;
+			}
 		}
-		pix_enc += stride_pix_enc;
-		pix_ref += stride_pix_ref;
+		p_sad += me_range*3;
 	}
-	return cost;
-
 }
 
