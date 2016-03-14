@@ -173,9 +173,20 @@ GENERATED += common/oclobj.h
 SRCS += common/opencl.c encoder/slicetype-cl.c
 endif
 
+# added by Wenchy 2016-03-12: compile .cu file
+ifeq ($(HAVE_CUDA),yes)
+common/cuda/motionsearch.o: common/cuda/motionsearch.cu
+	nvcc -c -o $@ $<
+endif
+
 OBJS   += $(SRCS:%.c=%.o)
 OBJCLI += $(SRCCLI:%.c=%.o)
 OBJSO  += $(SRCSO:%.c=%.o)
+
+# added by Wenchy 2016-03-12: compile .cu file
+OBJS   += common/cuda/motionsearch.o
+OBJCLI += common/cuda/motionsearch.o
+OBJSO  += common/cuda/motionsearch.o
 
 .PHONY: all default fprofiled clean distclean install install-* uninstall cli lib-* etags
 
@@ -185,7 +196,7 @@ lib-shared: $(SONAME)
 
 $(LIBX264): $(GENERATED) .depend $(OBJS) $(OBJASM)
 	rm -f $(LIBX264)
-	$(AR)$@ $(OBJS) $(OBJASM)
+	$(AR)$@ $(OBJS) $(OBJASM) 
 	$(if $(RANLIB), $(RANLIB) $@)
 
 $(SONAME): $(GENERATED) .depend $(OBJS) $(OBJASM) $(OBJSO)
