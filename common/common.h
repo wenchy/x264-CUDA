@@ -234,6 +234,11 @@ static const uint8_t x264_scan8[16*3 + 3] =
 #if HAVE_OPENCL
 #include "opencl.h"
 #endif
+
+// added by Wenchy 2016-03-14
+#if HAVE_CUDA
+#include "cuda/x264-cuda.h"
+#endif
 #include "cabac.h"
 #include "bitstream.h"
 #include "set.h"
@@ -971,6 +976,9 @@ struct x264_t
 #if HAVE_OPENCL
     x264_opencl_t opencl;
 #endif
+#if HAVE_CUDA
+    x264_cuda_t cuda;
+#endif
 };
 
 // included at the end because it needs x264_t
@@ -1017,31 +1025,12 @@ static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[
 // added by Wenchy 2016-03-02
 void save_frame(x264_t *h);
 
-// added by Wenchy 2016-03-11
-#ifndef __X264_CUDA_T__
-#define __X264_CUDA_T__
-typedef struct x264_cuda_t
-{
-	int i_me_range;
-	int i_mb_x;
-	int i_mb_y;
-	int bw;
-	int bh;
-	int mv_min_x;
-	int mv_min_y;
-	int mv_max_x;
-	int mv_max_y;
-	pixel *fref_buf;
-	pixel *mb_enc;
-	int stride_ref;
-	uint16_t *p_cost_mvx;
-	uint16_t *p_cost_mvy;
-} x264_cuda_t;
-#endif  // __X264_CUDA_T__
-
-//#ifdef HAVE_CUDA
+#if HAVE_CUDA
 void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost );
-//#endif
+void cuda_me_init( x264_cuda_t *c);
+void cuda_me_end( x264_cuda_t *c);
+void cuda_me_fref_prefetch( x264_cuda_t *c);
+#endif
 
 #endif
 

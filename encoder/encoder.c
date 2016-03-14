@@ -2709,6 +2709,12 @@ static intptr_t x264_slice_write( x264_t *h )
     // Parallelize ME of P frame
     if( h->sh.i_type == SLICE_TYPE_P )
     {
+        // added by Wenchy 2016-03-14
+    #if HAVE_CUDA
+    	h->cuda.fref_buf = h->fref[0][0]->buffer[0];
+    	cuda_me_fref_prefetch( &(h->cuda) );
+    #endif
+
     	while( 1 )
 		{
 			mb_xy = i_mb_x + i_mb_y * h->mb.i_mb_width;

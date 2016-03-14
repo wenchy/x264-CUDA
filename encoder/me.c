@@ -324,7 +324,7 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         case X264_ME_CUDA_ESA:
         {
             /* ESA(exhaustive search algorithm) on CUDA*/
-#ifdef HAVE_CUDA
+#if HAVE_CUDA
         	if(bw == 16 && bh == 16)
         	{
         		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
@@ -332,26 +332,27 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
 				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
 				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
 
-        		x264_cuda_t cuda;
-        		cuda.i_me_range = i_me_range;
-				cuda.i_mb_x = h->mb.i_mb_x;
-				cuda.i_mb_y = h->mb.i_mb_y;
-				cuda.bw = bw;
-				cuda.bh = bh;
+        		h->cuda.i_me_range = 16;
+        		h->cuda.i_mb_width = h->mb.i_mb_width;
+        		h->cuda.i_mb_height = h->mb.i_mb_height;
+        		h->cuda.i_mb_x = h->mb.i_mb_x;
+        		h->cuda.i_mb_y = h->mb.i_mb_y;
+        		h->cuda.bw = bw;
+        		h->cuda.bh = bh;
 
-				cuda.mv_min_x = min_x;
-				cuda.mv_min_y = min_y;
-				cuda.mv_max_x = max_x;
-				cuda.mv_max_y = max_y;
+        		h->cuda.mv_min_x = min_x;
+        		h->cuda.mv_min_y = min_y;
+        		h->cuda.mv_max_x = max_x;
+        		h->cuda.mv_max_y = max_y;
 
-				cuda.fref_buf = h->fref[0][0]->buffer[0];
-				cuda.mb_enc = h->mb.pic.p_fenc[0];
-				cuda.stride_ref = h->fref[0][0]->i_stride[0];
+				//cuda.fref_buf = h->fref[0][0]->buffer[0];
+        		h->cuda.mb_enc = h->mb.pic.p_fenc[0];
+        		h->cuda.stride_ref = h->fref[0][0]->i_stride[0];
 
-				cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
-				cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
+        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
+        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
 
-				cuda_me( &cuda, &bmx, &bmy, &bcost );
+				cuda_me( &(h->cuda), &bmx, &bmy, &bcost );
         	}
         	else
         	{

@@ -1,4 +1,5 @@
 #include "x264-cuda.h"
+#include "motionsearch.h"
 
 __global__ void me( pixel *dev_mb_enc, pixel *dev_frame_ref, int *dev_result, int stride_ref , int mb_x, int mb_y, int bmx, int bmy);
 __device__ int pixel_sad_16x16( pixel *pix_enc, int stride_pix_enc, pixel *pix_ref, int stride_pix_ref );
@@ -25,22 +26,40 @@ __device__ int name( pixel *pix1, intptr_t i_stride_pix1,  \
 }
 
 
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_16x16, 16, 16 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_16x8,  16,  8 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_8x16,   8, 16 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_8x8,    8,  8 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_8x4,    8,  4 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_4x16,   4, 16 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_4x8,    4,  8 )
-CUDA_PIXEL_SAD_C( x264_CUDA_pixel_sad_4x4,    4,  4 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_16x16, 16, 16 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_16x8,  16,  8 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_8x16,   8, 16 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_8x8,    8,  8 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_8x4,    8,  4 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x16,   4, 16 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x8,    4,  8 )
+CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x4,    4,  4 )
 
+extern "C" void cuda_me_init( x264_cuda_t *c) {
+	int mb_width = c->i_mb_width;
+	int mb_height = c->i_mb_height;
+	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fref_buf), (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel) ) );
+}
+
+extern "C" void cuda_me_end( x264_cuda_t *c) {
+	HANDLE_ERROR( cudaFree( c->dev_fref_buf ) );
+}
+
+extern "C" void cuda_me_fref_prefetch( x264_cuda_t *c) {
+	int mb_width = c->i_mb_width;
+	int mb_height = c->i_mb_height;
+	// copy 'fref_buf'  to the GPU memory c->dev_fref_buf
+	HANDLE_ERROR( cudaMemcpy( c->dev_fref_buf, c->fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
+}
 extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) {
 
-	int i_me_range = c->i_me_range;
+	int me_range = c->i_me_range;
+	int mb_width = c->i_mb_width;
+	int mb_height = c->i_mb_height;
 	int mb_x = c->i_mb_x;
 	int mb_y = c->i_mb_y;
 
-	pixel *fref_buf = c->fref_buf;
+	//pixel *fref_buf = c->fref_buf;
 	pixel *mb_enc =  c->mb_enc;
 	// int mb_stride = 16;
 
@@ -49,41 +68,38 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 	const uint16_t *p_cost_mvx = c->p_cost_mvx;
 	const uint16_t *p_cost_mvy = c->p_cost_mvy;
 
-	pixel *dev_mb_enc, *dev_fref_buf;
+	pixel *dev_mb_enc;//, *dev_fref_buf;
 	int *dev_result;
 
-	int *result = (int *)malloc( i_me_range*3 * i_me_range*3 * sizeof(int) );
+	int *result = (int *)malloc( me_range*3 * me_range*3 * sizeof(int) );
 	// allocate the memory on the GPU
 	HANDLE_ERROR( cudaMalloc( (void**)&dev_mb_enc, 16*16 * sizeof(pixel) ) );
-	HANDLE_ERROR( cudaMalloc( (void**)&dev_fref_buf, (352+PADH*2) * (288 + PADV*2) * sizeof(pixel) ) );
-	HANDLE_ERROR( cudaMalloc( (void**)&dev_result,  i_me_range*3 * i_me_range*3 * sizeof(int) ) );
+	//HANDLE_ERROR( cudaMalloc( (void**)&dev_fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel) ) );
+	HANDLE_ERROR( cudaMalloc( (void**)&dev_result,  me_range*3 * me_range*3 * sizeof(int) ) );
 
-	// copy the arrays 'mb_enc' and 'frame_ref' to the GPU
+	// copy the arrays 'mb_enc' and 'fref_buf' to the GPU
 	HANDLE_ERROR( cudaMemcpy( dev_mb_enc, mb_enc, (16 * 16) * sizeof(pixel), cudaMemcpyHostToDevice ) );
-	HANDLE_ERROR( cudaMemcpy( dev_fref_buf, fref_buf, (352+PADH*2) * (288 + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
-
-//	printf("in bmx: %d\n", (*p_bmx));
-//	printf("in bmy: %d\n", (*p_bmy));
-//	printf("in bcost: %d\n", (*p_bcost));
+	//HANDLE_ERROR( cudaMemcpy( dev_fref_buf, fref_buf, (mb_width+PADH*2) * (mb_height + PADV*2) * sizeof(pixel), cudaMemcpyHostToDevice ) );
 
 	dim3 grid(16*3,16*3);
 
-	me<<<grid,1>>>( dev_mb_enc, dev_fref_buf, dev_result, stride_ref, mb_x, mb_y, *p_bmx, *p_bmy);
+	me<<<grid,1>>>( dev_mb_enc, c->dev_fref_buf, dev_result, stride_ref, mb_x, mb_y, *p_bmx, *p_bmy);
+
+
 	// copy the array 'dev_result' back from the GPU to the CPU
-	HANDLE_ERROR( cudaMemcpy( result, dev_result, i_me_range*3 * i_me_range*3 * sizeof(int),
-							  cudaMemcpyDeviceToHost ) );
+	HANDLE_ERROR( cudaMemcpy( result, dev_result, me_range*3 * me_range*3 * sizeof(int), cudaMemcpyDeviceToHost ) );
 	int *p_result = result;
 //	for( int y = 0; y < 16*3*16*3; y++ )
 //	{
 //		printf("result[%d]: %d\n", y, p_result[y]);
 //	}
 	// process the results
-	for( int y = 0; y < i_me_range*3; y++ )
+	for( int y = 0; y < me_range*3; y++ )
 	{
-		for( int x = 0; x < i_me_range*3; x++ )
+		for( int x = 0; x < me_range*3; x++ )
 		{
-			int mx = x + (*p_bmx - i_me_range);
-			int my = y + (*p_bmy - i_me_range);
+			int mx = x + (*p_bmx - me_range);
+			int my = y + (*p_bmy - me_range);
 //			if(mx < c->mv_min_x || mx > c->mv_max_x || my < c->mv_min_y || my > c->mv_max_y)
 //				continue;
 			//printf("S: y: %d	x: %d    result: %d\n", y, x, p_result[x]);
@@ -96,7 +112,7 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 			}
 			//printf("E: y: %d	x: %d    result: %d\n", y, x, p_result[x]);
 		}
-		p_result += i_me_range*3;
+		p_result += me_range*3;
 	}
 //	printf("out bmx: %d\n", (*p_bmx));
 //	printf("out bmy: %d\n", (*p_bmy));
@@ -107,7 +123,7 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 
 	// free the memory allocated on the GPU
 	HANDLE_ERROR( cudaFree( dev_mb_enc ) );
-	HANDLE_ERROR( cudaFree( dev_fref_buf ) );
+	//HANDLE_ERROR( cudaFree( dev_fref_buf ) );
 	HANDLE_ERROR( cudaFree( dev_result ) );
 
 	return;
@@ -122,7 +138,7 @@ __global__ void me( pixel *dev_mb_enc, pixel *dev_fref_buf, int *dev_result, int
 	pixel *p_fref = p_fenc_plane + ( 16 * (mb_x - 1) + x ) +( 16 *  (mb_y - 1) + y )* stride_ref;
 	p_fref += bmx +bmy * stride_ref;
 
-	dev_result[offset] = x264_CUDA_pixel_sad_16x16(dev_mb_enc, 16, p_fref, stride_ref);
+	dev_result[offset] = x264_cuda_pixel_sad_16x16(dev_mb_enc, 16, p_fref, stride_ref);
 }
 
 //__global__ void cost_cmp( int *dev_result) {

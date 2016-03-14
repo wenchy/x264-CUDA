@@ -1907,6 +1907,14 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
     if( opt->tcfile_out )
         fprintf( opt->tcfile_out, "# timecode format v2\n" );
 
+    // added by Wenchy 2016-03-14
+#if HAVE_CUDA
+    printf("cuda_me_init\n");
+    h->cuda.i_mb_width = h->mb.i_mb_width;
+    h->cuda.i_mb_height = h->mb.i_mb_height;
+    cuda_me_init( &(h->cuda) );
+#endif
+
     /* Encode frames */
     for( ; !b_ctrl_c && (i_frame < param->i_frame_total || !param->i_frame_total); i_frame++ )
     {
@@ -2022,6 +2030,12 @@ fail:
         fprintf( stderr, "encoded %d frames, %.2f fps, %.2f kb/s\n", i_frame_output, fps,
                  (double) i_file * 8 / ( 1000 * duration ) );
     }
+
+    // added by Wenchy 2016-03-14
+#if HAVE_CUDA
+    printf("cuda_me_end\n");
+    cuda_me_end( &(h->cuda) );
+#endif
 
     return retval;
 }
