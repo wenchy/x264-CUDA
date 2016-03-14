@@ -32,7 +32,7 @@ PROF_GEN_CC=-fprofile-generate
 PROF_GEN_LD=-fprofile-generate
 PROF_USE_CC=-fprofile-use
 PROF_USE_LD=-fprofile-use
-HAVE_OPENCL=yes
+HAVE_OPENCL=no
 # added by Wenchy 2016-03-12: compile .cu file
 HAVE_CUDA=yes
 default: cli

@@ -19,7 +19,8 @@
 // set by Wenchy 2016-03-07: no need of interlaced mode
 #define HAVE_INTERLACED 0
 // #define HAVE_INTERLACED 1
-#define HAVE_OPENCL 1
+#define HAVE_OPENCL 0
+#define HAVE_CUDA 1
 #define HAVE_ALTIVEC 0
 #define HAVE_ALTIVEC_H 0
 #define HAVE_ARMV6 0
