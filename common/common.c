@@ -1452,6 +1452,7 @@ void save_frame(x264_t *h)
     char szFilename[32];
     int  x, y;
     pixel zero = 0;
+    //pixel *plane = h->mb.pic.p_fenc_plane[0];
 
     x264_frame_t *fenc = h->fenc;
     int width =  h->fenc->i_width[0];
@@ -1499,7 +1500,19 @@ void save_frame(x264_t *h)
 		   fwrite(&zero, 1, 1, pFile);
     	}
 	}
+/*
+    // Write header
+	fprintf(pFile, "P6\n%d %d\n255\n", width+PADH*2, height+PADV*2);
 
+	// Write pixel data
+	for(y = 0; y < height+PADV*2; y++) {
+		for(x = 0; x < width+PADH*2; x++) {
+		   fwrite(&(h->fenc->buffer[0][x+h->fenc->i_stride[0]*y]), 1, 1, pFile);
+		   fwrite(&zero, 1, 1, pFile);
+		   fwrite(&zero, 1, 1, pFile);
+		}
+	}
+*/
     // Close file
     fclose(pFile);
 }

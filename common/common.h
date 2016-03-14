@@ -1017,5 +1017,31 @@ static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[
 // added by Wenchy 2016-03-02
 void save_frame(x264_t *h);
 
+// added by Wenchy 2016-03-11
+#ifndef __X264_CUDA_T__
+#define __X264_CUDA_T__
+typedef struct x264_cuda_t
+{
+	int i_me_range;
+	int i_mb_x;
+	int i_mb_y;
+	int bw;
+	int bh;
+	int mv_min_x;
+	int mv_min_y;
+	int mv_max_x;
+	int mv_max_y;
+	pixel *fref_buf;
+	pixel *mb_enc;
+	int stride_ref;
+	uint16_t *p_cost_mvx;
+	uint16_t *p_cost_mvy;
+} x264_cuda_t;
+#endif  // __X264_CUDA_T__
+
+//#ifdef HAVE_CUDA
+void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost );
+//#endif
+
 #endif
 
