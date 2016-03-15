@@ -10,6 +10,9 @@
 #define PADH 32
 #define PADV 32
 
+#define MAX_INT 65535
+// 1024 = (16*2 * 16*2), also 2^10, also Max threads per block:  1024
+#define THREADS_PER_BLOCK 1024
 
 static void HandleError( cudaError_t err,
                          const char *file,
