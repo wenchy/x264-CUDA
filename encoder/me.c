@@ -363,7 +363,7 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
 
 				/* plain old exhaustive search */
 				for( int my = min_y; my <= max_y; my++ )
-					for( int mx = min_x; mx < max_y; mx++ )
+					for( int mx = min_x; mx < max_x; mx++ )
 						COST_MV( mx, my );
         	}
 #else
