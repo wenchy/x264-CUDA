@@ -332,7 +332,7 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
 				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
 				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
 
-        		h->cuda.i_me_range = 16;
+        		h->cuda.i_me_range = h->param.analyse.i_me_range;
         		h->cuda.i_mb_width = h->mb.i_mb_width;
         		h->cuda.i_mb_height = h->mb.i_mb_height;
         		h->cuda.i_mb_x = h->mb.i_mb_x;
@@ -359,11 +359,11 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
 				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
 				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
 				/* SEA is fastest in multiples of 4 */
-				const int width = (max_x - min_x + 3) & ~3;
+				//const int width = (max_x - min_x + 3) & ~3;
 
 				/* plain old exhaustive search */
 				for( int my = min_y; my <= max_y; my++ )
-					for( int mx = min_x; mx < min_x + width; mx++ )
+					for( int mx = min_x; mx < max_y; mx++ )
 						COST_MV( mx, my );
         	}
 #else

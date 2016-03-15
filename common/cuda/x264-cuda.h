@@ -22,6 +22,7 @@ typedef struct x264_cuda_t
 	int i_mb_width;
 	int i_mb_height;
 
+	// block width, block height
 	int bw;
 	int bh;
 
