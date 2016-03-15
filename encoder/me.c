@@ -325,7 +325,7 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         {
             /* ESA(exhaustive search algorithm) on CUDA*/
 #if HAVE_CUDA
-        	if(bw == 16 && bh == 16)
+        	if( m->i_pixel <= 6 /* PIXEL_4x4 */)
         	{
         		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
 				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
@@ -337,6 +337,8 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         		h->cuda.i_mb_height = h->mb.i_mb_height;
         		h->cuda.i_mb_x = h->mb.i_mb_x;
         		h->cuda.i_mb_y = h->mb.i_mb_y;
+
+        		h->cuda.i_pixel = m->i_pixel;
         		h->cuda.bw = bw;
         		h->cuda.bh = bh;
 

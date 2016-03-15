@@ -14,6 +14,17 @@
 // 1024 = (16*2 * 16*2), also 2^10, also Max threads per block:  1024
 #define THREADS_PER_BLOCK 1024
 
+enum
+{
+    PIXEL_16x16 = 0,
+    PIXEL_16x8  = 1,
+    PIXEL_8x16  = 2,
+    PIXEL_8x8   = 3,
+    PIXEL_8x4   = 4,
+    PIXEL_4x8   = 5,
+    PIXEL_4x4   = 6
+};
+
 static void HandleError( cudaError_t err,
                          const char *file,
                          int line ) {
