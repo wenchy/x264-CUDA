@@ -63,11 +63,11 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 
 	int stride_buf = c->stride_buf;
 
-	int *dev_sads;
+	//int *dev_sads;
 	x264_mvc_t *mvc; // CUDA Unified Memory
 
 	// allocate the memory on the GPU
-	HANDLE_ERROR( cudaMalloc( (void**)&dev_sads, me_range*2 * me_range*2 * sizeof( int) ) );
+	//HANDLE_ERROR( cudaMalloc( (void**)&dev_sads, me_range*2 * me_range*2 * sizeof( int) ) );
 	// CUDA Unified Memory
 	HANDLE_ERROR( cudaMallocManaged( (void**)&mvc, mb_width * mb_height * sizeof( x264_mvc_t) ) );
 
@@ -87,16 +87,16 @@ extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) 
 //
 //	me<<<blocks, threads>>>( c->dev_fenc_buf, c->dev_fref_buf, dev_sads, me_range, stride_buf, mb_x, mb_y, *p_bmx, *p_bmy);
 
-	dim3 grid_cmp(1, 1);
-	cmp<<<grid_cmp, 1>>>( dev_sads, mvc, me_range);
-	cudaDeviceSynchronize();
+//	dim3 grid_cmp(1, 1);
+//	cmp<<<grid_cmp, 1>>>( dev_sads, mvc, me_range);
+//	cudaDeviceSynchronize();
 
 	(*p_bcost)= mvc->cost;
 	(*p_bmx)= mvc->mx;
 	(*p_bmy)=mvc->my;
 
 	// free the memory allocated on the GPU
-	HANDLE_ERROR( cudaFree( dev_sads ) );
+	//HANDLE_ERROR( cudaFree( dev_sads ) );
 	HANDLE_ERROR( cudaFree( mvc ) );
 
 	return;
