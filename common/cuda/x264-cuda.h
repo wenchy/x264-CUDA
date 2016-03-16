@@ -16,8 +16,7 @@ typedef long int intptr_t;
 /* Motion Vector and Cost */
 typedef struct x264_cuda_mvc_t
 {
-	int16_t mx;
-	int16_t my;
+	int16_t mv[2];
 	int cost;
 } x264_cuda_mvc_t;
 

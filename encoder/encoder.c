@@ -2769,7 +2769,12 @@ static intptr_t x264_slice_write( x264_t *h )
 			else
 				x264_macroblock_cache_load_progressive( h, i_mb_x, i_mb_y );
 
+		    // added by Wenchy 2016-03-14
+		#if HAVE_CUDA
+			x264_macroblock_analyse_P( h );
+		#else
 			x264_macroblock_analyse( h );
+		#endif
 
 			/* encode this macroblock -> be careful it can change the mb type to P_SKIP if needed */
 	reencode_P:

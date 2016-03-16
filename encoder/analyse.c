@@ -3043,12 +3043,114 @@ static inline void x264_mb_analyse_qp_rd( x264_t *h, x264_mb_analysis_t *a )
 }
 
 /*****************************************************************************
+ * x264_macroblock_analyse_P:
+ *****************************************************************************/
+// added by Wenchy 2016-03-16
+#if HAVE_CUDA
+void x264_macroblock_analyse_P( x264_t *h )
+{
+	x264_mb_analysis_t analysis;
+	int i_cost = COST_MAX;
+
+	h->mb.i_qp = x264_ratecontrol_mb_qp( h );
+	/* If the QP of this MB is within 1 of the previous MB, code the same QP as the previous MB,
+	 * to lower the bit cost of the qp_delta.  Don't do this if QPRD is enabled. */
+	if( h->param.rc.i_aq_mode && h->param.analyse.i_subpel_refine < 10 )
+		h->mb.i_qp = abs(h->mb.i_qp - h->mb.i_last_qp) == 1 ? h->mb.i_last_qp : h->mb.i_qp;
+
+	if( h->param.analyse.b_mb_info )
+		h->fdec->effective_qp[h->mb.i_mb_xy] = h->mb.i_qp; /* Store the real analysis QP. */
+	x264_mb_analyse_init( h, &analysis, h->mb.i_qp );
+
+    /*--------------------------- Do the analysis ---------------------------*/
+	x264_mb_analysis_t *a= &analysis;
+	h->mb.i_type = P_L0;
+	h->mb.i_partition = D_16x16;
+	a->l0.me16x16.i_ref = 0;
+
+	int mb_x = h->mb.i_mb_x;
+	int mb_y = h->mb.i_mb_y;
+	int mb_width = h->mb.i_mb_width;
+	//int mb_height = h->mb.i_mb_height;
+
+	i_cost = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].cost;
+	int mx = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[0];
+	int my = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[1];
+
+	a->l0.me16x16.mv[0] = mx;
+	a->l0.me16x16.mv[1] = my;
+
+	switch( h->mb.i_type )
+	{
+	 	 case P_L0:
+			 switch( h->mb.i_partition )
+			 {
+				 case D_16x16:
+					 x264_macroblock_cache_ref( h, 0, 0, 4, 4, 0, a->l0.me16x16.i_ref );
+					 x264_macroblock_cache_mv_ptr( h, 0, 0, 4, 4, 0, a->l0.me16x16.mv );
+					 break;
+
+				 case D_16x8:
+					 x264_macroblock_cache_ref( h, 0, 0, 4, 2, 0, a->l0.me16x8[0].i_ref );
+					 x264_macroblock_cache_ref( h, 0, 2, 4, 2, 0, a->l0.me16x8[1].i_ref );
+					 x264_macroblock_cache_mv_ptr( h, 0, 0, 4, 2, 0, a->l0.me16x8[0].mv );
+					 x264_macroblock_cache_mv_ptr( h, 0, 2, 4, 2, 0, a->l0.me16x8[1].mv );
+					 break;
+
+				 case D_8x16:
+					 x264_macroblock_cache_ref( h, 0, 0, 2, 4, 0, a->l0.me8x16[0].i_ref );
+					 x264_macroblock_cache_ref( h, 2, 0, 2, 4, 0, a->l0.me8x16[1].i_ref );
+					 x264_macroblock_cache_mv_ptr( h, 0, 0, 2, 4, 0, a->l0.me8x16[0].mv );
+					 x264_macroblock_cache_mv_ptr( h, 2, 0, 2, 4, 0, a->l0.me8x16[1].mv );
+					 break;
+
+				 default:
+					 x264_log( h, X264_LOG_ERROR, "internal error P_L0 and partition=%d\n", h->mb.i_partition );
+					 break;
+			 }
+			 break;
+		default:
+			break;
+	}
+
+	/*--------------------------- End the analysis ---------------------------*/
+
+	 //x264_analyse_update_cache( h, &analysis );
+
+	/* In rare cases we can end up qpel-RDing our way back to a larger partition size
+	 * without realizing it.  Check for this and account for it if necessary. */
+	if( analysis.i_mbrd >= 2 )
+	{
+		/* Don't bother with bipred or 8x8-and-below, the odds are incredibly low. */
+		static const uint8_t check_mv_lists[X264_MBTYPE_MAX] = {[P_L0]=1, [B_L0_L0]=1, [B_L1_L1]=2};
+		int list = check_mv_lists[h->mb.i_type] - 1;
+		if( list >= 0 && h->mb.i_partition != D_16x16 &&
+			M32( &h->mb.cache.mv[list][x264_scan8[0]] ) == M32( &h->mb.cache.mv[list][x264_scan8[12]] ) &&
+			h->mb.cache.ref[list][x264_scan8[0]] == h->mb.cache.ref[list][x264_scan8[12]] )
+				h->mb.i_partition = D_16x16;
+	}
+
+	if( !analysis.i_mbrd )
+		x264_mb_analyse_transform( h );
+
+	if( analysis.i_mbrd == 3 && !IS_SKIP(h->mb.i_type) )
+		x264_mb_analyse_qp_rd( h, &analysis );
+
+	h->mb.b_trellis = h->param.analyse.i_trellis;
+	h->mb.b_noise_reduction = h->mb.b_noise_reduction || (!!h->param.analyse.i_noise_reduction && !IS_INTRA( h->mb.i_type ));
+
+	if( !IS_SKIP(h->mb.i_type) && h->mb.i_psy_trellis && h->param.analyse.i_trellis == 1 )
+		x264_psy_trellis_init( h, 0 );
+	if( h->mb.b_trellis == 1 || h->mb.b_noise_reduction )
+		h->mb.i_skip_intra = 0;
+}
+#endif
+
+/*****************************************************************************
  * x264_macroblock_analyse:
  *****************************************************************************/
 void x264_macroblock_analyse( x264_t *h )
 {
-	// added by Wenchy
-	// printf("%3d   %3d\n", h->mb.i_mb_xy, h->mb.i_mb_width);
     x264_mb_analysis_t analysis;
     int i_cost = COST_MAX;
 

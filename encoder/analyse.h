@@ -32,6 +32,10 @@ int x264_analyse_init_costs( x264_t *h, float *logs, int qp );
 void x264_analyse_free_costs( x264_t *h );
 void x264_analyse_weight_frame( x264_t *h, int end );
 void x264_macroblock_analyse( x264_t *h );
+// added by Wenchy 2016-03-16
+#if HAVE_CUDA
+void x264_macroblock_analyse_P( x264_t *h );
+#endif
 void x264_slicetype_decide( x264_t *h );
 
 void x264_slicetype_analyse( x264_t *h, int intra_minigop );

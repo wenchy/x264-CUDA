@@ -2,7 +2,6 @@
 #include "motionsearch.h"
 
 __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf);
-__global__ void cmp(int *dev_sads, x264_cuda_mvc_t *dev_mvc, int me_range);
 
 /****************************************************************************
  * cuda_pixel_sad_WxH
@@ -111,27 +110,19 @@ extern "C" void cuda_me_prefetch( x264_cuda_t *c) {
 extern "C" void cuda_me( x264_cuda_t *c) {
 
 	int me_range = c->i_me_range;
-	//printf("me_range: %d\n", me_range);
 	int mb_width = c->i_mb_width;
 	int mb_height = c->i_mb_height;
-//	int mb_x = c->i_mb_x;
-//	int mb_y = c->i_mb_y;
 
 	int stride_buf = c->stride_buf;
 
 
 	dim3    blocks(mb_width, mb_height);
-	//	dim3    threads(me_range*2, me_range*2);
+//	dim3    threads(me_range*2, me_range*2);
 	dim3 grid_sad(me_range*2 * me_range*2);
 
 	me<<<blocks, THREADS_PER_BLOCK>>>( c->i_pixel, c->dev_fenc_buf, c->dev_fref_buf, c->p_mvc16x16, me_range, stride_buf);
 	HANDLE_ERROR( cudaPeekAtLastError() );
 	HANDLE_ERROR( cudaDeviceSynchronize() );
-
-//	(*p_bcost)= mvc->cost;
-//	(*p_bmx)= mvc->mx;
-//	(*p_bmy)=mvc->my;
-
 
 
 //	if((*p_bmx) !=0 && (*p_bmy) != 0)
@@ -220,36 +211,13 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 
 	if (offset == 0)
 	{
-		p_mvc16x16[mb_x + mb_y*mb_width].mx = index[0] % ( me_range*2 ) - me_range;
-		p_mvc16x16[mb_x + mb_y*mb_width].my = index[0] / ( me_range*2 ) - me_range;
+		p_mvc16x16[mb_x + mb_y*mb_width].mv[0] = index[0] % ( me_range*2 ) - me_range;
+		p_mvc16x16[mb_x + mb_y*mb_width].mv[1] = index[0] / ( me_range*2 ) - me_range;
 		p_mvc16x16[mb_x + mb_y*mb_width].cost = sadCache[ index[0] ];
 
 //		mvc->cost = sadCache[ index[0] ];
 //		mvc->mx = index[0] % ( me_range*2 ) - me_range;
 //		mvc->my = index[0] / ( me_range*2 ) - me_range;
-	}
-}
-
-__global__ void cmp(int *dev_sads, x264_cuda_mvc_t *mvc, int me_range){
-	// map from blockIdx to pixel position
-	int bmx = mvc->mx;
-	int bmy = mvc->my;
-	int *p_sad = dev_sads;
-	for( int y = 0; y < me_range*2; y++ )
-	{
-		for( int x = 0; x < me_range*2; x++ )
-		{
-			int mx = x + (bmx - me_range);
-			int my = y + (bmy - me_range);
-			int cost =  p_sad[x];
-			if((cost)<(mvc->cost))
-			{
-				mvc->cost = cost;
-				mvc->mx = mx;
-				mvc->my = my;
-			}
-		}
-		p_sad += me_range*2;
 	}
 }
 
