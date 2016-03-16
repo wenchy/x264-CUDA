@@ -3062,7 +3062,7 @@ void x264_macroblock_analyse_P( x264_t *h )
 		h->fdec->effective_qp[h->mb.i_mb_xy] = h->mb.i_qp; /* Store the real analysis QP. */
 	x264_mb_analyse_init( h, &analysis, h->mb.i_qp );
 
-    /*--------------------------- Do the analysis ---------------------------*/
+    /*--------------------------- Do the analysis and update cache ---------------------------*/
 	x264_mb_analysis_t *a= &analysis;
 	h->mb.i_type = P_L0;
 	h->mb.i_partition = D_16x16;
@@ -3105,15 +3105,34 @@ void x264_macroblock_analyse_P( x264_t *h )
 					 break;
 
 				 default:
-					 x264_log( h, X264_LOG_ERROR, "internal error P_L0 and partition=%d\n", h->mb.i_partition );
+					 x264_log( h, X264_LOG_ERROR, "CUDA internal error P_L0 and partition=%d\n", h->mb.i_partition );
 					 break;
 			 }
 			 break;
+
+        case P_8x8:
+            x264_macroblock_cache_ref( h, 0, 0, 2, 2, 0, a->l0.me8x8[0].i_ref );
+            x264_macroblock_cache_ref( h, 2, 0, 2, 2, 0, a->l0.me8x8[1].i_ref );
+            x264_macroblock_cache_ref( h, 0, 2, 2, 2, 0, a->l0.me8x8[2].i_ref );
+            x264_macroblock_cache_ref( h, 2, 2, 2, 2, 0, a->l0.me8x8[3].i_ref );
+            for( int i = 0; i < 4; i++ )
+                x264_mb_cache_mv_p8x8( h, a, i );
+            break;
+
+        case P_SKIP:
+        {
+            h->mb.i_partition = D_16x16;
+            x264_macroblock_cache_ref( h, 0, 0, 4, 4, 0, 0 );
+            x264_macroblock_cache_mv_ptr( h, 0, 0, 4, 4, 0, h->mb.cache.pskip_mv );
+            break;
+        }
+
 		default:
+            x264_log( h, X264_LOG_ERROR, "CUDA internal error (invalid MB type)\n" );
 			break;
 	}
 
-	/*--------------------------- End the analysis ---------------------------*/
+	/*--------------------------- End the analysis and update cache ---------------------------*/
 
 	 //x264_analyse_update_cache( h, &analysis );
 
