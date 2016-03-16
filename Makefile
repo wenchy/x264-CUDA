@@ -176,7 +176,7 @@ endif
 # added by Wenchy 2016-03-12: compile .cu file
 ifeq ($(HAVE_CUDA),yes)
 common/cuda/motionsearch.o: common/cuda/motionsearch.cu
-	nvcc -c -o $@ $<
+	nvcc -G -c -o $@ $<
 endif
 
 OBJS   += $(SRCS:%.c=%.o)
