@@ -1911,6 +1911,7 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
 #if HAVE_CUDA
     h->cuda.i_mb_width = h->mb.i_mb_width;
     h->cuda.i_mb_height = h->mb.i_mb_height;
+    h->cuda.i_me_range = h->param.analyse.i_me_range;
     cuda_me_init( &(h->cuda) );
 #endif
 

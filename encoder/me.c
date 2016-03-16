@@ -325,34 +325,43 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         {
             /* ESA(exhaustive search algorithm) on CUDA*/
 #if HAVE_CUDA
-        	if( m->i_pixel <= 6 /* PIXEL_4x4 */)
+        	if( m->i_pixel == 0 /* PIXEL_4x4 */)
         	{
-        		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
-				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
-				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
-				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
+//        		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
+//				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
+//				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
+//				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
 
-        		h->cuda.i_me_range = h->param.analyse.i_me_range;
-        		h->cuda.i_mb_width = h->mb.i_mb_width;
-        		h->cuda.i_mb_height = h->mb.i_mb_height;
-        		h->cuda.i_mb_x = h->mb.i_mb_x;
-        		h->cuda.i_mb_y = h->mb.i_mb_y;
+//        		h->cuda.i_me_range = h->param.analyse.i_me_range;
+//        		h->cuda.i_mb_width = h->mb.i_mb_width;
+//        		h->cuda.i_mb_height = h->mb.i_mb_height;
+//        		h->cuda.i_mb_x = h->mb.i_mb_x;
+//        		h->cuda.i_mb_y = h->mb.i_mb_y;
 
-        		h->cuda.i_pixel = m->i_pixel;
-        		h->cuda.bw = bw;
-        		h->cuda.bh = bh;
+//        		h->cuda.i_pixel = m->i_pixel;
+//        		h->cuda.bw = bw;
+//        		h->cuda.bh = bh;
+//
+//        		h->cuda.mv_min_x = min_x;
+//        		h->cuda.mv_min_y = min_y;
+//        		h->cuda.mv_max_x = max_x;
+//        		h->cuda.mv_max_y = max_y;
+//
+//
+//
+//        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
+//        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
 
-        		h->cuda.mv_min_x = min_x;
-        		h->cuda.mv_min_y = min_y;
-        		h->cuda.mv_max_x = max_x;
-        		h->cuda.mv_max_y = max_y;
+        		int mb_x = h->mb.i_mb_x;
+        		int mb_y = h->mb.i_mb_y;
+        		int mb_width = h->mb.i_mb_width;
+        		//int mb_height = h->mb.i_mb_height;
 
+        		bcost = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].cost;
+        		bmx = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mx;
+        		bmy = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].my;
 
-
-        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
-        		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
-
-				cuda_me( &(h->cuda), &bmx, &bmy, &bcost );
+				//cuda_me( &(h->cuda), &bmx, &bmy, &bcost );
         	}
         	else
         	{

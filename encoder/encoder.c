@@ -2716,6 +2716,8 @@ static intptr_t x264_slice_write( x264_t *h )
     	h->cuda.stride_buf = h->fref[0][0]->i_stride[0];
     	h->cuda.i_frame = h->i_frame;
     	cuda_me_prefetch( &(h->cuda) );
+    	h->cuda.i_pixel = 0;
+    	cuda_me( &(h->cuda) );
     #endif
 
     	while( 1 )

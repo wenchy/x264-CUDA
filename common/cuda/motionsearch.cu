@@ -1,8 +1,8 @@
 #include "x264-cuda.h"
 #include "motionsearch.h"
 
-__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_mvc_t *mvc, int me_range, int stride_buf, int mb_x, int mb_y);
-__global__ void cmp(int *dev_sads, x264_mvc_t *dev_mvc, int me_range);
+__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf);
+__global__ void cmp(int *dev_sads, x264_cuda_mvc_t *dev_mvc, int me_range);
 
 /****************************************************************************
  * cuda_pixel_sad_WxH
@@ -75,11 +75,6 @@ extern "C" void cuda_me_init( x264_cuda_t *c) {
 	int buf_width = 16 * c->i_mb_width + PADH*2;
 	int buf_height = 16 * c->i_mb_height + PADV*2;
 	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fenc_buf), buf_width * buf_height * sizeof(pixel) ) );
-//	pixel a[buf_width*buf_height];
-//		for(int i = 0; i< buf_width*buf_height; i++)
-//			a[i] = 0;
-//	HANDLE_ERROR( cudaMemcpy( c->dev_fenc_buf, &a, buf_width * buf_height * sizeof(pixel), cudaMemcpyHostToDevice ) );
-
 	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fref_buf), buf_width * buf_height * sizeof(pixel) ) );
 	// CUDA Unified Memory
 //	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->cudafpelcmp), 7 * sizeof( x264_cuda_pixel_cmp_t) ) );
@@ -91,15 +86,16 @@ extern "C" void cuda_me_init( x264_cuda_t *c) {
 //	c->cudafpelcmp[PIXEL_4x8]   = &x264_cuda_pixel_sad_4x8;
 //	c->cudafpelcmp[PIXEL_4x4]   = &x264_cuda_pixel_sad_4x4;
 
-	// mb mv
-	//c->mv = (x264_cuda_mv_t)malloc( (mb_width * mb_height) * 2 * sizeof(int16_t) );
+	// mb mvc
+	// CUDA Unified Memory
+	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->p_mvc16x16), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_mvc_t) ) );
 	printf("*****cuda_me_init*****\n");
 }
 
 extern "C" void cuda_me_end( x264_cuda_t *c) {
 	HANDLE_ERROR( cudaFree( c->dev_fenc_buf ) );
 	HANDLE_ERROR( cudaFree( c->dev_fref_buf ) );
-	//HANDLE_ERROR( cudaFree( c->cudafpelcmp ) );
+	HANDLE_ERROR( cudaFree( c->p_mvc16x16 ) );
 	printf("*****cuda_me_end*****\n");
 }
 
@@ -112,65 +108,40 @@ extern "C" void cuda_me_prefetch( x264_cuda_t *c) {
 	//printf("*****cuda_me_prefetch*****\n");
 }
 
-extern "C" void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost ) {
+extern "C" void cuda_me( x264_cuda_t *c) {
 
 	int me_range = c->i_me_range;
 	//printf("me_range: %d\n", me_range);
-//	int mb_width = c->i_mb_width;
-//	int mb_height = c->i_mb_height;
-	int mb_x = c->i_mb_x;
-	int mb_y = c->i_mb_y;
+	int mb_width = c->i_mb_width;
+	int mb_height = c->i_mb_height;
+//	int mb_x = c->i_mb_x;
+//	int mb_y = c->i_mb_y;
 
 	int stride_buf = c->stride_buf;
 
-	// CUDA Unified Memory
-	x264_mvc_t *mvc;
 
-
-	// allocate the memory on the GPU
-	// CUDA Unified Memory
-	HANDLE_ERROR( cudaMallocManaged( (void**)&mvc, sizeof( x264_mvc_t) ) );
-
-
-
-//	mvc->mx = *p_bmx;
-//	mvc->my = *p_bmy;
-//	mvc->cost = *p_bcost;
-
-	mvc->mx = 0;
-	mvc->my = 0;
-
-
-
+	dim3    blocks(mb_width, mb_height);
+	//	dim3    threads(me_range*2, me_range*2);
 	dim3 grid_sad(me_range*2 * me_range*2);
 
-	me<<<1, THREADS_PER_BLOCK>>>( c->i_pixel, c->dev_fenc_buf, c->dev_fref_buf, mvc, me_range, stride_buf, mb_x, mb_y);
+	me<<<blocks, THREADS_PER_BLOCK>>>( c->i_pixel, c->dev_fenc_buf, c->dev_fref_buf, c->p_mvc16x16, me_range, stride_buf);
 	HANDLE_ERROR( cudaPeekAtLastError() );
 	HANDLE_ERROR( cudaDeviceSynchronize() );
-//
-//	dim3    blocks(mb_width, mb_height);
-//	dim3    threads(me_range*2, me_range*2);
-//
-//	me<<<blocks, threads>>>( c->dev_fenc_buf, c->dev_fref_buf, dev_sads, me_range, stride_buf, mb_x, mb_y, *p_bmx, *p_bmy);
 
-//	dim3 grid_cmp(1, 1);
-//	cmp<<<grid_cmp, 1>>>( dev_sads, mvc, me_range);
-	//cudaDeviceSynchronize();
+//	(*p_bcost)= mvc->cost;
+//	(*p_bmx)= mvc->mx;
+//	(*p_bmy)=mvc->my;
 
-	(*p_bcost)= mvc->cost;
-	(*p_bmx)= mvc->mx;
-	(*p_bmy)=mvc->my;
+
 
 //	if((*p_bmx) !=0 && (*p_bmy) != 0)
 //		printf("i_pixel: %d mx: %d	my: %d\n", c->i_pixel, mvc->mx, mvc->my);
 
-	// free the memory allocated on the GPU
-	HANDLE_ERROR( cudaFree( mvc ) );
 
 	return;
 }
 
-__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_mvc_t *mvc, int me_range, int stride_buf, int mb_x, int mb_y) {
+__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf) {
 	 __shared__ int sadCache[THREADS_PER_BLOCK];
 	 __shared__ int index[THREADS_PER_BLOCK];
 
@@ -182,6 +153,10 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 	int offset = threadIdx.x;
 	int x = threadIdx.x % ( me_range*2 );
 	int y = threadIdx.x / ( me_range*2 );
+
+	int mb_x = blockIdx.x;
+	int mb_y = blockIdx.y;
+	int mb_width = gridDim.x;
 
 	pixel *p_fenc_plane = dev_fenc_buf + stride_buf * PADV + PADH;
 	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
@@ -245,13 +220,17 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 
 	if (offset == 0)
 	{
-		mvc->cost = sadCache[ index[0] ];
-		mvc->mx = index[0] % ( me_range*2 ) - me_range;
-		mvc->my = index[0] / ( me_range*2 ) - me_range;
+		p_mvc16x16[mb_x + mb_y*mb_width].mx = index[0] % ( me_range*2 ) - me_range;
+		p_mvc16x16[mb_x + mb_y*mb_width].my = index[0] / ( me_range*2 ) - me_range;
+		p_mvc16x16[mb_x + mb_y*mb_width].cost = sadCache[ index[0] ];
+
+//		mvc->cost = sadCache[ index[0] ];
+//		mvc->mx = index[0] % ( me_range*2 ) - me_range;
+//		mvc->my = index[0] / ( me_range*2 ) - me_range;
 	}
 }
 
-__global__ void cmp(int *dev_sads, x264_mvc_t *mvc, int me_range){
+__global__ void cmp(int *dev_sads, x264_cuda_mvc_t *mvc, int me_range){
 	// map from blockIdx to pixel position
 	int bmx = mvc->mx;
 	int bmy = mvc->my;

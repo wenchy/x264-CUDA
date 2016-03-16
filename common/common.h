@@ -1026,7 +1026,7 @@ static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[
 void save_frame(x264_t *h);
 
 #if HAVE_CUDA
-void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost );
+void cuda_me( x264_cuda_t *c);
 void cuda_me_init( x264_cuda_t *c);
 void cuda_me_end( x264_cuda_t *c);
 void cuda_me_prefetch( x264_cuda_t *c);
