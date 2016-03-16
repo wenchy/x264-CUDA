@@ -12,10 +12,11 @@ typedef unsigned   uint32_t;
 typedef uint8_t  pixel;
 typedef long int intptr_t;
 // cmp functions
-typedef int  (*x264_cuda_pixel_cmp_t) ( pixel *, intptr_t, pixel *, intptr_t );
-
+//typedef int  (*x264_cuda_pixel_cmp_t) ( pixel *, intptr_t, pixel *, intptr_t );
+typedef int16_t (*x264_cuda_mv_t)[2];
 typedef struct x264_cuda_t
 {
+	int i_frame;
 	int i_me_range;
 
 	int i_mb_x;
@@ -41,10 +42,12 @@ typedef struct x264_cuda_t
 	pixel *dev_fref_buf;
 	int stride_buf;
 
-	x264_cuda_pixel_cmp_t *cudafpelcmp; /* sad for fullpel motion search */
+	//x264_cuda_pixel_cmp_t *cudafpelcmp; /* sad for fullpel motion search */
 
 	uint16_t *p_cost_mvx;
 	uint16_t *p_cost_mvy;
+	// mb mv
+	x264_cuda_mv_t mv;
 } x264_cuda_t;
 
 /* Motion Vector and Cost */

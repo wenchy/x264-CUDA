@@ -2713,7 +2713,9 @@ static intptr_t x264_slice_write( x264_t *h )
     #if HAVE_CUDA
     	h->cuda.fref_buf = h->fref[0][0]->buffer[0];
     	h->cuda.fenc_buf = h->fenc->buffer[0];
-    	cuda_me_fref_prefetch( &(h->cuda) );
+    	h->cuda.stride_buf = h->fref[0][0]->i_stride[0];
+    	h->cuda.i_frame = h->i_frame;
+    	cuda_me_prefetch( &(h->cuda) );
     #endif
 
     	while( 1 )

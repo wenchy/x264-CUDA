@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-
+#include <cuda_runtime.h>
 /* number of pixels past the edge of the frame, for motion estimation/compensation */
 #define PADH 32
 #define PADV 32
@@ -25,6 +25,16 @@ enum
     PIXEL_4x4   = 6
 };
 
+#define HANDLE_ERROR(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess)
+   {
+      fprintf(stderr,"CUDAassert: %s in %s at line %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
+
 static void HandleError( cudaError_t err,
                          const char *file,
                          int line ) {
@@ -34,7 +44,7 @@ static void HandleError( cudaError_t err,
         exit( EXIT_FAILURE );
     }
 }
-#define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
+//#define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
 
 
 #define HANDLE_NULL( a ) {if (a == NULL) { \

@@ -1909,7 +1909,6 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
 
     // added by Wenchy 2016-03-14
 #if HAVE_CUDA
-    printf("cuda_me_init\n");
     h->cuda.i_mb_width = h->mb.i_mb_width;
     h->cuda.i_mb_height = h->mb.i_mb_height;
     cuda_me_init( &(h->cuda) );
@@ -2033,7 +2032,6 @@ fail:
 
     // added by Wenchy 2016-03-14
 #if HAVE_CUDA
-    printf("cuda_me_end\n");
     cuda_me_end( &(h->cuda) );
 #endif
 

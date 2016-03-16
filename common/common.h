@@ -1029,7 +1029,7 @@ void save_frame(x264_t *h);
 void cuda_me( x264_cuda_t *c, int *p_bmx, int *p_bmy, int *p_bcost );
 void cuda_me_init( x264_cuda_t *c);
 void cuda_me_end( x264_cuda_t *c);
-void cuda_me_fref_prefetch( x264_cuda_t *c);
+void cuda_me_prefetch( x264_cuda_t *c);
 #endif
 
 #endif

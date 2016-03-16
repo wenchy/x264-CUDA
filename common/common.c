@@ -1488,7 +1488,7 @@ void save_frame(x264_t *h)
     if(pFile == NULL) {
         return;
     }
-
+    /*
     // Write header
     fprintf(pFile, "P6\n%d %d\n255\n", width, height);
 
@@ -1500,7 +1500,7 @@ void save_frame(x264_t *h)
 		   fwrite(&zero, 1, 1, pFile);
     	}
 	}
-/*
+*/
     // Write header
 	fprintf(pFile, "P6\n%d %d\n255\n", width+PADH*2, height+PADV*2);
 
@@ -1512,7 +1512,6 @@ void save_frame(x264_t *h)
 		   fwrite(&zero, 1, 1, pFile);
 		}
 	}
-*/
     // Close file
     fclose(pFile);
 }

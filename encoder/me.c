@@ -347,7 +347,7 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         		h->cuda.mv_max_x = max_x;
         		h->cuda.mv_max_y = max_y;
 
-        		h->cuda.stride_buf = h->fref[0][0]->i_stride[0];
+
 
         		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[0];
         		h->cuda.p_cost_mvx = m->p_cost_mv - m->mvp[1];
