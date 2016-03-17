@@ -13,7 +13,7 @@ typedef uint8_t  pixel;
 typedef long int intptr_t;
 
 
-/* Motion Vector and Cost */
+/* best Motion Vector and Cost */
 typedef struct x264_cuda_mvc_t
 {
 	int16_t mv[2];
@@ -67,6 +67,7 @@ typedef struct x264_cuda_t
 	uint16_t *p_cost_mvy;
 	// mb mv
 	x264_cuda_mvc_t *p_mvc16x16;
+	x264_cuda_me_t *me;
 } x264_cuda_t;
 
 

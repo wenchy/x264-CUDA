@@ -3073,9 +3073,15 @@ void x264_macroblock_analyse_P( x264_t *h )
 	int mb_width = h->mb.i_mb_width;
 	//int mb_height = h->mb.i_mb_height;
 
-	i_cost = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].cost;
-	int mx = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[0];
-	int my = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[1];
+	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
+
+	i_cost = mb_me->mvc16x16.cost;
+	int mx = mb_me->mvc16x16.mv[0];
+	int my = mb_me->mvc16x16.mv[1];
+
+//	i_cost = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.cost;
+//	int mx = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.mv[0];
+//	int my = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.mv[1];
 
 	a->l0.me16x16.mv[0] = mx;
 	a->l0.me16x16.mv[1] = my;
@@ -3116,7 +3122,34 @@ void x264_macroblock_analyse_P( x264_t *h )
             x264_macroblock_cache_ref( h, 0, 2, 2, 2, 0, a->l0.me8x8[2].i_ref );
             x264_macroblock_cache_ref( h, 2, 2, 2, 2, 0, a->l0.me8x8[3].i_ref );
             for( int i = 0; i < 4; i++ )
-                x264_mb_cache_mv_p8x8( h, a, i );
+            {	//x264_mb_cache_mv_p8x8( h, a, i );
+                int x = 2*(i&1);
+                int y = i&2;
+
+                switch( h->mb.i_sub_partition[i] )
+                {
+                    case D_L0_8x8:
+                        x264_macroblock_cache_mv_ptr( h, x, y, 2, 2, 0, a->l0.me8x8[i].mv );
+                        break;
+                    case D_L0_8x4:
+                        x264_macroblock_cache_mv_ptr( h, x, y+0, 2, 1, 0, a->l0.me8x4[i][0].mv );
+                        x264_macroblock_cache_mv_ptr( h, x, y+1, 2, 1, 0, a->l0.me8x4[i][1].mv );
+                        break;
+                    case D_L0_4x8:
+                        x264_macroblock_cache_mv_ptr( h, x+0, y, 1, 2, 0, a->l0.me4x8[i][0].mv );
+                        x264_macroblock_cache_mv_ptr( h, x+1, y, 1, 2, 0, a->l0.me4x8[i][1].mv );
+                        break;
+                    case D_L0_4x4:
+                        x264_macroblock_cache_mv_ptr( h, x+0, y+0, 1, 1, 0, a->l0.me4x4[i][0].mv );
+                        x264_macroblock_cache_mv_ptr( h, x+1, y+0, 1, 1, 0, a->l0.me4x4[i][1].mv );
+                        x264_macroblock_cache_mv_ptr( h, x+0, y+1, 1, 1, 0, a->l0.me4x4[i][2].mv );
+                        x264_macroblock_cache_mv_ptr( h, x+1, y+1, 1, 1, 0, a->l0.me4x4[i][3].mv );
+                        break;
+                    default:
+                        x264_log( h, X264_LOG_ERROR, "internal error\n" );
+                        break;
+                }
+            }
             break;
 
         case P_SKIP:
