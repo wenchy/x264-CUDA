@@ -3064,27 +3064,46 @@ void x264_macroblock_analyse_P( x264_t *h )
 
     /*--------------------------- Do the analysis and update cache ---------------------------*/
 	x264_mb_analysis_t *a= &analysis;
-	h->mb.i_type = P_L0;
-	h->mb.i_partition = D_16x16;
-	a->l0.me16x16.i_ref = 0;
+	h->mb.i_type = P_8x8;
+    h->mb.i_partition = D_8x8;
+
+//	h->mb.i_type = P_L0;
+//	h->mb.i_partition = D_16x16;
+
 
 	int mb_x = h->mb.i_mb_x;
 	int mb_y = h->mb.i_mb_y;
 	int mb_width = h->mb.i_mb_width;
 	//int mb_height = h->mb.i_mb_height;
 
+//	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
+//
+//	i_cost = mb_me->mvc16x16.cost;
+//	int mx = mb_me->mvc16x16.mv[0];
+//	int my = mb_me->mvc16x16.mv[1];
+
 	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
 
-	i_cost = mb_me->mvc16x16.cost;
-	int mx = mb_me->mvc16x16.mv[0];
-	int my = mb_me->mvc16x16.mv[1];
+	for(int i8x8 = 0; i8x8 < 4; i8x8++)
+	{
+		h->mb.i_sub_partition[i8x8] = D_L0_8x8;
+		i_cost = mb_me->mvc8x8[i8x8].cost;
+		int mx = mb_me->mvc8x8[i8x8].mv[0];
+		int my = mb_me->mvc8x8[i8x8].mv[1];
+
+		a->l0.me8x8[i8x8].i_ref = 0;
+		a->l0.me8x8[i8x8].mv[0] = mx;
+		a->l0.me8x8[i8x8].mv[1] = my;
+
+		//printf("x: %d    y: %d\n", mx, my);
+	}
 
 //	i_cost = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.cost;
 //	int mx = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.mv[0];
 //	int my = h->cuda.me[mb_x + mb_y*mb_width].mvc16x16.mv[1];
-
-	a->l0.me16x16.mv[0] = mx;
-	a->l0.me16x16.mv[1] = my;
+//	a->l0.me16x16.i_ref = 0;
+//	a->l0.me16x16.mv[0] = mx;
+//	a->l0.me16x16.mv[1] = my;
 
 	switch( h->mb.i_type )
 	{

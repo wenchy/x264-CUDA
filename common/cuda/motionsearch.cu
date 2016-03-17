@@ -81,7 +81,7 @@ extern "C" void cuda_me_init( x264_cuda_t *c) {
 
 	// mb mvc
 	// CUDA Unified Memory
-	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->p_mvc16x16), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_mvc_t) ) );
+//	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->p_mvc16x16), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_mvc_t) ) );
 	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->me), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) ) );
 
 	printf("*****cuda_me_init***** %lu x 41 = %lu\n", sizeof(x264_cuda_mvc_t), sizeof(x264_cuda_me_t));
@@ -90,7 +90,7 @@ extern "C" void cuda_me_init( x264_cuda_t *c) {
 extern "C" void cuda_me_end( x264_cuda_t *c) {
 	HANDLE_ERROR( cudaFree( c->dev_fenc_buf ) );
 	HANDLE_ERROR( cudaFree( c->dev_fref_buf ) );
-	HANDLE_ERROR( cudaFree( c->p_mvc16x16 ) );
+//	HANDLE_ERROR( cudaFree( c->p_mvc16x16 ) );
 	HANDLE_ERROR( cudaFree( c->me ) );
 	printf("*****cuda_me_end*****\n");
 }
@@ -109,7 +109,6 @@ extern "C" void cuda_me( x264_cuda_t *c) {
 	int me_range = c->i_me_range;
 	int mb_width = c->i_mb_width;
 	int mb_height = c->i_mb_height;
-
 	int stride_buf = c->stride_buf;
 
 
@@ -120,7 +119,6 @@ extern "C" void cuda_me( x264_cuda_t *c) {
 	HANDLE_ERROR( cudaPeekAtLastError() );
 	HANDLE_ERROR( cudaDeviceSynchronize() );
 
-
 //	if((*p_bmx) !=0 && (*p_bmy) != 0)
 //		printf("i_pixel: %d mx: %d	my: %d\n", c->i_pixel, mvc->mx, mvc->my);
 
@@ -129,17 +127,12 @@ extern "C" void cuda_me( x264_cuda_t *c) {
 }
 
 __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf) {
-	 __shared__ int sadCache[THREADS_PER_BLOCK]; // 4k
+	 __shared__ int sadCache[4][THREADS_PER_BLOCK]; // 16k
 	 __shared__ int index[THREADS_PER_BLOCK]; // 4k
 
-	// map from blockIdx to pixel position
-//	int x = blockIdx.x;
-//	int y = blockIdx.y;
-//	int offset = x + y * gridDim.x;
-
 	int offset = threadIdx.x;
-	int x = threadIdx.x % ( me_range*2 );
-	int y = threadIdx.x / ( me_range*2 );
+	int ox = threadIdx.x % ( me_range*2 );
+	int oy = threadIdx.x / ( me_range*2 );
 
 	int mb_x = blockIdx.x;
 	int mb_y = blockIdx.y;
@@ -149,71 +142,78 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
 
 	pixel *p_fenc = p_fenc_plane + ( 16 * mb_x) +( 16 * mb_y)* stride_buf;
-	pixel *p_fref = p_fref_plane + ( 16 * mb_x + x - me_range) +( 16 * mb_y + y - me_range)* stride_buf;
+	pixel *p_fref = p_fref_plane + ( 16 * mb_x- me_range) +( 16 * mb_y  - me_range)* stride_buf;
 
-	int temp = MAX_INT;
-	switch(i_pixel)
+	for(int i8x8 = 0; i8x8 < 4; i8x8++)
 	{
-		case PIXEL_16x16:
-			temp = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_16x8:
-			temp = x264_cuda_pixel_sad_16x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x16:
-			temp = x264_cuda_pixel_sad_8x16(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x8:
-			temp = x264_cuda_pixel_sad_8x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x4:
-			temp = x264_cuda_pixel_sad_8x4(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_4x8:
-			temp = x264_cuda_pixel_sad_4x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_4x4:
-			temp = x264_cuda_pixel_sad_4x4(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		default:
-			break;
+		int i8x8_x = i8x8 % 2;
+		int i8x8_y = i8x8 / 2;
 
-	}
-	//temp = cudafpelcmp[i_pixel](p_fenc, stride_buf, p_fref, stride_buf);
-	//temp = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
+		pixel *p_enc = p_fenc + ( i8x8_x * 8 + (i8x8_y * 8) * stride_buf );
+		pixel *p_ref = p_fref + ox+ oy * stride_buf + ( i8x8_x * 8 + (i8x8_y * 8) * stride_buf );
 
-	// set the sads values
-	sadCache[offset] = temp;
-	index[offset] = offset;
+		int temp = MAX_INT;
+		temp = x264_cuda_pixel_sad_8x8(p_enc, stride_buf, p_ref, stride_buf);
 
-	// synchronize threads in this block
-	__syncthreads();
+		// set the sads values
+		sadCache[i8x8][offset] = temp;
+		index[offset] = offset;
 
-	// for reductions, THREADS_PER_BLOCK must be a power of 2
-	// because of the following code： find least SAD
-	int i = blockDim.x/2;
-	while (i != 0) {
-		if (offset < i)
-		{
-			if (sadCache[ index[offset] ] > sadCache[ index[offset + i] ])
-			{
-				index[offset] = index[offset + i];
-			}
-		}
+		// synchronize threads in this block
 		__syncthreads();
-		i /= 2;
+
+		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// because of the following code： find least SAD
+		int i = blockDim.x/2;
+		while (i != 0) {
+			if (offset < i)
+			{
+				if (sadCache[i8x8][ index[offset] ] > sadCache[i8x8][ index[offset + i] ])
+				{
+					index[offset] = index[offset + i];
+				}
+			}
+			__syncthreads();
+			i /= 2;
+		}
+
+		if (offset == 0)
+		{
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadCache[i8x8][ index[0] ];
+		}
+		//__syncthreads();
 	}
 
-	if (offset == 0)
-	{
-		me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % ( me_range*2 ) - me_range;
-		me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / ( me_range*2 ) - me_range;
-		me[mb_x + mb_y*mb_width].mvc16x16.cost = sadCache[ index[0] ];
+//	switch(i_pixel)
+//	{
+//		case PIXEL_16x16:
+//			temp = x264_cuda_pixel_sad_16x16(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_16x8:
+//			temp = x264_cuda_pixel_sad_16x8(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_8x16:
+//			temp = x264_cuda_pixel_sad_8x16(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_8x8:
+//			temp = x264_cuda_pixel_sad_8x8(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_8x4:
+//			temp = x264_cuda_pixel_sad_8x4(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_4x8:
+//			temp = x264_cuda_pixel_sad_4x8(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		case PIXEL_4x4:
+//			temp = x264_cuda_pixel_sad_4x4(p_enc, stride_buf, p_ref, stride_buf);
+//			break;
+//		default:
+//			break;
+//
+//	}
 
-//		mvc->cost = sadCache[ index[0] ];
-//		mvc->mx = index[0] % ( me_range*2 ) - me_range;
-//		mvc->my = index[0] / ( me_range*2 ) - me_range;
-	}
 }
 
 __global__ void me0( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf) {

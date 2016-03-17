@@ -324,35 +324,6 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
         case X264_ME_CUDA_ESA:
         {
             /* ESA(exhaustive search algorithm) on CUDA*/
-#if HAVE_CUDA
-        	if( m->i_pixel < 0 /* PIXEL_4x4 */)
-        	{
-        		int mb_x = h->mb.i_mb_x;
-        		int mb_y = h->mb.i_mb_y;
-        		int mb_width = h->mb.i_mb_width;
-        		//int mb_height = h->mb.i_mb_height;
-
-        		bcost = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].cost;
-        		bmx = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[0];
-        		bmy = h->cuda.p_mvc16x16[mb_x + mb_y*mb_width].mv[1];
-
-				//cuda_me( &(h->cuda), &bmx, &bmy, &bcost );
-        	}
-        	else
-        	{
-        		const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
-				const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
-				const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
-				const int max_y = X264_MIN( bmy + i_me_range, mv_y_max );
-				/* SEA is fastest in multiples of 4 */
-				//const int width = (max_x - min_x + 3) & ~3;
-
-				/* plain old exhaustive search */
-				for( int my = min_y; my <= max_y; my++ )
-					for( int mx = min_x; mx < max_x; mx++ )
-						COST_MV( mx, my );
-        	}
-#else
             const int min_x = X264_MAX( bmx - i_me_range, mv_x_min );
             const int min_y = X264_MAX( bmy - i_me_range, mv_y_min );
             const int max_x = X264_MIN( bmx + i_me_range, mv_x_max );
@@ -364,7 +335,6 @@ void x264_me_search_ref( x264_t *h, x264_me_t *m, int16_t (*mvc)[2], int i_mvc, 
             for( int my = min_y; my <= max_y; my++ )
                 for( int mx = min_x; mx < min_x + width; mx++ )
                     COST_MV( mx, my );
-#endif
             break;
         }
         case X264_ME_DIA:

@@ -66,7 +66,8 @@ typedef struct x264_cuda_t
 	uint16_t *p_cost_mvx;
 	uint16_t *p_cost_mvy;
 	// mb mv
-	x264_cuda_mvc_t *p_mvc16x16;
+//	x264_cuda_mvc_t *p_mvc16x16;
+	// each MB have a me(x264_cuda_me_t)
 	x264_cuda_me_t *me;
 } x264_cuda_t;
 
