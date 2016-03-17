@@ -59,9 +59,9 @@ typedef struct x264_cuda_t
 	pixel *dev_fenc_buf;
 	pixel *dev_fref_buf;
 	int stride_buf;
-	// pointer to real frame
-	pixel *dev_fenc_plane;
-	pixel *dev_fref_plane;
+//	// pointer to real frame
+//	pixel *dev_fenc_plane;
+//	pixel *dev_fref_plane;
 
 	uint16_t *p_cost_mvx;
 	uint16_t *p_cost_mvy;
