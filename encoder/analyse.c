@@ -3089,6 +3089,55 @@ void x264_macroblock_analyse_P( x264_t *h )
 		a->l0.me16x16.mv[1] = my;
 	}
 
+
+	temp_cost = 0;
+	for(int i16x8 = 0; i16x8 < 4; i16x8++)
+	{
+		temp_cost +=  mb_me->mvc16x8[i16x8].cost;
+	}
+
+	if( temp_cost < i_cost)
+	{
+		i_cost = temp_cost;
+
+		h->mb.i_type = P_L0;
+		h->mb.i_partition = D_16x8;
+
+		for(int i16x8 = 0; i16x8 < 4; i16x8++)
+		{
+			int mx = mb_me->mvc16x8[i16x8].mv[0];
+			int my = mb_me->mvc16x8[i16x8].mv[1];
+
+			a->l0.me16x8[i16x8].i_ref = 0;
+			a->l0.me16x8[i16x8].mv[0] = mx;
+			a->l0.me16x8[i16x8].mv[1] = my;
+		}
+	}
+
+	temp_cost = 0;
+	for(int i8x16 = 0; i8x16 < 4; i8x16++)
+	{
+		temp_cost +=  mb_me->mvc16x8[i8x16].cost;
+	}
+
+	if( temp_cost < i_cost)
+	{
+		i_cost = temp_cost;
+
+		h->mb.i_type = P_L0;
+		h->mb.i_partition = D_8x16;
+
+		for(int i8x16 = 0; i8x16 < 4; i8x16++)
+		{
+			int mx = mb_me->mvc16x8[i8x16].mv[0];
+			int my = mb_me->mvc16x8[i8x16].mv[1];
+
+			a->l0.me8x16[i8x16].i_ref = 0;
+			a->l0.me8x16[i8x16].mv[0] = mx;
+			a->l0.me8x16[i8x16].mv[1] = my;
+		}
+	}
+
 	temp_cost = 0;
 	for(int i8x8 = 0; i8x8 < 4; i8x8++)
 	{
