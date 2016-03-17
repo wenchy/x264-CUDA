@@ -128,9 +128,10 @@ extern "C" void cuda_me( x264_cuda_t *c) {
 
 __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf) {
 	 __shared__ int sadCache[4][THREADS_PER_BLOCK]; // 16k
+	 __shared__ int sadMerge[THREADS_PER_BLOCK]; // 4k
 	 __shared__ int index[THREADS_PER_BLOCK]; // 4k
 
-	int offset = threadIdx.x;
+	const int offset = threadIdx.x;
 	int ox = threadIdx.x % ( me_range*2 );
 	int oy = threadIdx.x / ( me_range*2 );
 
@@ -183,36 +184,51 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
 			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadCache[i8x8][ index[0] ];
 		}
-		//__syncthreads();
+		__syncthreads();
 	}
 
-//	switch(i_pixel)
-//	{
-//		case PIXEL_16x16:
-//			temp = x264_cuda_pixel_sad_16x16(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_16x8:
-//			temp = x264_cuda_pixel_sad_16x8(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_8x16:
-//			temp = x264_cuda_pixel_sad_8x16(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_8x8:
-//			temp = x264_cuda_pixel_sad_8x8(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_8x4:
-//			temp = x264_cuda_pixel_sad_8x4(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_4x8:
-//			temp = x264_cuda_pixel_sad_4x8(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		case PIXEL_4x4:
-//			temp = x264_cuda_pixel_sad_4x4(p_enc, stride_buf, p_ref, stride_buf);
-//			break;
-//		default:
-//			break;
-//
-//	}
+	/* 1. 8x8 SAD merging into 16x16, 16x8, 8x16
+	 * 2. find least SAD and corresponding MV
+	 */
+	for(int i16x16 = 0; i16x16 < 1; i16x16++)
+	{
+//		int x = offset % ( me_range*2 );
+//		int y = offset / ( me_range*2 );
+
+		// set the sads values
+		sadMerge[offset] = 0;
+		for(int i8x8 = 0; i8x8 < 4; i8x8++)
+		{
+			sadMerge[offset] += sadCache[i8x8][offset];
+		}
+		index[offset] = offset;
+
+		// synchronize threads in this block
+		__syncthreads();
+
+		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// because of the following code： find least SAD
+		int i = blockDim.x/2;
+		while (i != 0) {
+			if (offset < i)
+			{
+				if (sadMerge[ index[offset] ] > sadMerge[ index[offset + i] ])
+				{
+					index[offset] = index[offset + i];
+				}
+			}
+			__syncthreads();
+			i /= 2;
+		}
+
+		if (offset == 0)
+		{
+			me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % ( me_range*2 ) - me_range;
+			me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / ( me_range*2 ) - me_range;
+			me[mb_x + mb_y*mb_width].mvc16x16.cost = sadMerge[ index[0] ];
+		}
+		__syncthreads();
+	}
 
 }
 
