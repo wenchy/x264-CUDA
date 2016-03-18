@@ -3063,6 +3063,7 @@ void x264_macroblock_analyse_P( x264_t *h )
 	x264_mb_analyse_init( h, &analysis, h->mb.i_qp );
 
     /*--------------------------- Do the analysis and update cache ---------------------------*/
+
 #define FPEL(mv) (((mv)+2)>>2) /* Convert subpel MV to fullpel with rounding... */
 #define SPEL(mv) ((mv)<<2)     /* ... and the reverse. */
 #define SPELx2(mv) (SPEL(mv)&0xFFFCFFFC) /* for two packed MVs */
@@ -3094,8 +3095,6 @@ void x264_macroblock_analyse_P( x264_t *h )
 		M32(a->l0.me16x16.mv ) = bmv_spel;
 
 		a->l0.me16x16.i_ref = 0;
-//		a->l0.me16x16.mv[0] = mx;
-//		a->l0.me16x16.mv[1] = my;
 	}
 
 
@@ -3123,8 +3122,6 @@ void x264_macroblock_analyse_P( x264_t *h )
 			M32(a->l0.me16x8[i16x8].mv ) = bmv_spel;
 
 			a->l0.me16x8[i16x8].i_ref = 0;
-//			a->l0.me16x8[i16x8].mv[0] = mx;
-//			a->l0.me16x8[i16x8].mv[1] = my;
 		}
 	}
 
@@ -3152,8 +3149,6 @@ void x264_macroblock_analyse_P( x264_t *h )
 			M32(a->l0.me8x16[i8x16].mv ) = bmv_spel;
 
 			a->l0.me8x16[i8x16].i_ref = 0;
-//			a->l0.me8x16[i8x16].mv[0] = mx;
-//			a->l0.me8x16[i8x16].mv[1] = my;
 		}
 	}
 
@@ -3190,6 +3185,77 @@ void x264_macroblock_analyse_P( x264_t *h )
 		}
 	}
 
+	/* h->mb.i_type: P_SKIP analysis START*/
+    int b_skip = 0;
+    analysis.b_try_skip = 0;
+	/* Special fast-skip logic using information from mb_info. */
+	if( h->fdec->mb_info && (h->fdec->mb_info[h->mb.i_mb_xy]&X264_MBINFO_CONSTANT) )
+	{
+		if( !SLICE_MBAFF && (h->fdec->i_frame - h->fref[0][0]->i_frame) == 1 && !h->sh.b_weighted_pred &&
+			h->fref[0][0]->effective_qp[h->mb.i_mb_xy] <= h->mb.i_qp )
+		{
+			h->mb.i_partition = D_16x16;
+			/* Use the P-SKIP MV if we can... */
+			if( !M32(h->mb.cache.pskip_mv) )
+			{
+				b_skip = 1;
+				h->mb.i_type = P_SKIP;
+			}
+			/* Otherwise, just force a 16x16 block. */
+			else
+			{
+				h->mb.i_type = P_L0;
+				analysis.l0.me16x16.i_ref = 0;
+				M32( analysis.l0.me16x16.mv ) = 0;
+			}
+			goto skip_analysis_P;
+		}
+		/* Reset the information accordingly */
+		else if( h->param.analyse.b_mb_info_update )
+			h->fdec->mb_info[h->mb.i_mb_xy] &= ~X264_MBINFO_CONSTANT;
+	}
+
+	int skip_invalid = h->i_thread_frames > 1 && h->mb.cache.pskip_mv[1] > h->mb.mv_max_spel[1];
+	/* If the current macroblock is off the frame, just skip it. */
+	if( HAVE_INTERLACED && !MB_INTERLACED && h->mb.i_mb_y * 16 >= h->param.i_height && !skip_invalid )
+		b_skip = 1;
+	/* Fast P_SKIP detection */
+	else if( h->param.analyse.b_fast_pskip )
+	{
+		if( skip_invalid )
+			// FIXME don't need to check this if the reference frame is done
+			{}
+		else if( h->param.analyse.i_subpel_refine >= 3 )
+			analysis.b_try_skip = 1;
+		else if( h->mb.i_mb_type_left[0] == P_SKIP ||
+				 h->mb.i_mb_type_top == P_SKIP ||
+				 h->mb.i_mb_type_topleft == P_SKIP ||
+				 h->mb.i_mb_type_topright == P_SKIP )
+			b_skip = x264_macroblock_probe_pskip( h );
+	}
+    if( b_skip )
+    {
+        h->mb.i_type = P_SKIP;
+        h->mb.i_partition = D_16x16;
+skip_analysis_P:
+		/* Set up MVs for future predictors */
+		for( int i = 0; i < h->mb.pic.i_fref[0]; i++ )
+			M32( h->mb.mvr[0][i][h->mb.i_mb_xy] ) = 0;
+    }
+
+	if( h->mb.i_partition == D_16x16 && a->b_try_skip
+		&& a->l0.me16x16.cost < (300 + 300)*a->i_lambda
+		&&  abs(a->l0.me16x16.mv[0]-h->mb.cache.pskip_mv[0])
+		  + abs(a->l0.me16x16.mv[1]-h->mb.cache.pskip_mv[1]) <= 1
+		&& x264_macroblock_probe_pskip( h ) )
+	{
+		h->mb.i_type = P_SKIP;
+		x264_analyse_update_cache( h, a );
+		assert( h->mb.cache.pskip_mv[1] <= h->mb.mv_max_spel[1] || h->i_thread_frames == 1 );
+	}
+	/* h->mb.i_type: P_SKIP analysis END*/
+
+	/* update cache  */
 	switch( h->mb.i_type )
 	{
 	 	 case P_L0:
@@ -3258,6 +3324,7 @@ void x264_macroblock_analyse_P( x264_t *h )
 
         case P_SKIP:
         {
+        	//printf("***********P_SKIP\n");
             h->mb.i_partition = D_16x16;
             x264_macroblock_cache_ref( h, 0, 0, 4, 4, 0, 0 );
             x264_macroblock_cache_mv_ptr( h, 0, 0, 4, 4, 0, h->mb.cache.pskip_mv );
