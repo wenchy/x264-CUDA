@@ -3077,113 +3077,197 @@ void x264_macroblock_analyse_P( x264_t *h )
 
 	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
 
-	int temp_cost = mb_me->mvc16x16.cost;
-
-	if( temp_cost < i_cost)
-	{
-		i_cost = temp_cost;
-
-		h->mb.i_type = P_L0;
-		h->mb.i_partition = D_16x16;
-
-		int mx = mb_me->mvc16x16.mv[0];
-		int my = mb_me->mvc16x16.mv[1];
-
-		/* -> qpel mv */
-		uint32_t bmv = pack16to32_mask(mx,my);
-		uint32_t bmv_spel = SPELx2(bmv);
-		M32(a->l0.me16x16.mv ) = bmv_spel;
-
-		a->l0.me16x16.i_ref = 0;
-	}
-
-
-	temp_cost = 0;
-	for(int i16x8 = 0; i16x8 < 2; i16x8++)
-	{
-		temp_cost +=  mb_me->mvc16x8[i16x8].cost;
-	}
-
-	if( temp_cost < i_cost)
-	{
-		i_cost = temp_cost;
-
-		h->mb.i_type = P_L0;
-		h->mb.i_partition = D_16x8;
-
-		for(int i16x8 = 0; i16x8 < 2; i16x8++)
-		{
-			int mx = mb_me->mvc16x8[i16x8].mv[0];
-			int my = mb_me->mvc16x8[i16x8].mv[1];
-
-			/* -> qpel mv */
-			uint32_t bmv = pack16to32_mask(mx,my);
-			uint32_t bmv_spel = SPELx2(bmv);
-			M32(a->l0.me16x8[i16x8].mv ) = bmv_spel;
-
-			a->l0.me16x8[i16x8].i_ref = 0;
-		}
-	}
-
-	temp_cost = 0;
-	for(int i8x16 = 0; i8x16 < 2; i8x16++)
-	{
-		temp_cost +=  mb_me->mvc8x16[i8x16].cost;
-	}
-
-	if( temp_cost < i_cost)
-	{
-		i_cost = temp_cost;
-
-		h->mb.i_type = P_L0;
-		h->mb.i_partition = D_8x16;
-
-		for(int i8x16 = 0; i8x16 < 2; i8x16++)
-		{
-			int mx = mb_me->mvc8x16[i8x16].mv[0];
-			int my = mb_me->mvc8x16[i8x16].mv[1];
-
-			/* -> qpel mv */
-			uint32_t bmv = pack16to32_mask(mx,my);
-			uint32_t bmv_spel = SPELx2(bmv);
-			M32(a->l0.me8x16[i8x16].mv ) = bmv_spel;
-
-			a->l0.me8x16[i8x16].i_ref = 0;
-		}
-	}
-
-	temp_cost = 0;
+	int temp_cost = 0;
 	for(int i8x8 = 0; i8x8 < 4; i8x8++)
 	{
 		temp_cost +=  mb_me->mvc8x8[i8x8].cost;
 	}
 
-	if( temp_cost < i_cost)
+	if(temp_cost < mb_me->mvc16x16.cost)
 	{
 		i_cost = temp_cost;
+		int i_sub_cost;
 
 		h->mb.i_type = P_8x8;
-	    h->mb.i_partition = D_8x8;
+		h->mb.i_partition = D_8x8;
 
 		for(int i8x8 = 0; i8x8 < 4; i8x8++)
 		{
-			h->mb.i_sub_partition[i8x8] = D_L0_8x8;
+			{
+				h->mb.i_sub_partition[i8x8] = D_L0_8x8;
+				int mx = mb_me->mvc8x8[i8x8].mv[0];
+				int my = mb_me->mvc8x8[i8x8].mv[1];
 
-			int mx = mb_me->mvc8x8[i8x8].mv[0];
-			int my = mb_me->mvc8x8[i8x8].mv[1];
+				/* -> qpel mv */
+				uint32_t bmv = pack16to32_mask(mx,my);
+				uint32_t bmv_spel = SPELx2(bmv);
+				M32(a->l0.me8x8[i8x8].mv ) = bmv_spel;
+				a->l0.me8x8[i8x8].i_ref = 0;
+
+//			    int x = 2*(i8x8&1);
+//			    int y = i8x8&2;
+//			    x264_macroblock_cache_mv_ptr( h, x, y, 2, 2, 0, a->l0.me8x8[i8x8].mv );
+			}
+			i_sub_cost = mb_me->mvc8x8[i8x8].cost;
+			continue;
+
+			int i8x8_x = i8x8%2;
+			int i8x8_y = i8x8/2;
+			temp_cost = 0;
+			int i = 0;
+			for(int i4x4_y = i8x8_y * 2; i4x4_y < i8x8_y * 2 + 2; i4x4_y++)
+			{
+				for(int i4x4_x = i8x8_x * 2; i4x4_x < i8x8_x * 2 + 2; i4x4_x++)
+				{
+					temp_cost += mb_me->mvc4x4[i4x4_x + i4x4_y * 4].cost;
+
+					int mx = mb_me->mvc4x4[i4x4_x + i4x4_y * 4].mv[0];
+					int my = mb_me->mvc4x4[i4x4_x + i4x4_y * 4].mv[1];
+					//printf("mx: %d	my: %d\n", mx, my);
+					/* -> qpel mv */
+					uint32_t bmv = pack16to32_mask(mx,my);
+					uint32_t bmv_spel = SPELx2(bmv);
+					M32(a->l0.me4x4[i8x8][i].mv ) = bmv_spel;
+					a->l0.me4x4[i8x8][i].i_ref = 0;
+					i++;
+				}
+			}
+			if( temp_cost < i_sub_cost)
+			{
+				//printf("temp_cost: %d	i_sub_cost: %d\n", temp_cost, i_sub_cost);
+				i_sub_cost = temp_cost;
+				h->mb.i_sub_partition[i8x8] = D_L0_4x4;
+
+			}
+			else
+			{
+				continue;
+				temp_cost = 0;
+				i = 0;
+				for(int i8x4_y = i8x8_y * 2; i8x4_y < i8x8_y * 2 + 2; i8x4_y++)
+				{
+					for(int i8x4_x = i8x8_x; i8x4_x < i8x8_x + 1; i8x4_x++)
+					{
+						temp_cost +=  mb_me->mvc8x4[i8x4_x + i8x4_y * 2].cost;
+						int mx = mb_me->mvc8x4[i8x4_x + i8x4_y * 2].mv[0];
+						int my = mb_me->mvc8x4[i8x4_x + i8x4_y * 2].mv[1];
+
+						/* -> qpel mv */
+						uint32_t bmv = pack16to32_mask(mx,my);
+						uint32_t bmv_spel = SPELx2(bmv);
+						M32(a->l0.me8x4[i8x8][i++].mv ) = bmv_spel;
+					}
+				}
+				if( temp_cost < i_sub_cost)
+				{
+					i_sub_cost = temp_cost;
+					h->mb.i_sub_partition[i8x8] = D_L0_8x4;
+
+				}
+
+
+				temp_cost = 0;
+				i = 0;
+				for(int i4x8_y = i8x8_y; i4x8_y < i8x8_y + 1; i4x8_y++)
+				{
+					for(int i4x8_x = i8x8_x * 2; i4x8_x < i8x8_x * 2 + 2; i4x8_x++)
+					{
+						temp_cost +=  mb_me->mvc8x4[i4x8_x + i4x8_y * 2].cost;
+						int mx = mb_me->mvc8x4[i4x8_x + i4x8_y * 2].mv[0];
+						int my = mb_me->mvc8x4[i4x8_x + i4x8_y * 2].mv[1];
+
+						/* -> qpel mv */
+						uint32_t bmv = pack16to32_mask(mx,my);
+						uint32_t bmv_spel = SPELx2(bmv);
+						M32(a->l0.me4x8[i8x8][i++].mv ) = bmv_spel;
+					}
+				}
+				if( temp_cost < i_sub_cost)
+				{
+					i_sub_cost = temp_cost;
+					h->mb.i_sub_partition[i8x8] = D_L0_4x8;
+
+				}
+			}
+		}
+	}
+	else
+	{
+
+		{
+			i_cost = mb_me->mvc16x16.cost;
+
+			h->mb.i_type = P_L0;
+			h->mb.i_partition = D_16x16;
+
+			int mx = mb_me->mvc16x16.mv[0];
+			int my = mb_me->mvc16x16.mv[1];
 
 			/* -> qpel mv */
 			uint32_t bmv = pack16to32_mask(mx,my);
 			uint32_t bmv_spel = SPELx2(bmv);
-			M32(a->l0.me8x8[i8x8].mv ) = bmv_spel;
+			M32(a->l0.me16x16.mv ) = bmv_spel;
 
-			a->l0.me8x8[i8x8].i_ref = 0;
-//			a->l0.me8x8[i8x8].mv[0] = mx;
-//			a->l0.me8x8[i8x8].mv[1] = my;
+			a->l0.me16x16.i_ref = 0;
+		}
 
-			//printf("x: %d    y: %d\n", mx, my);
+		temp_cost = 0;
+		for(int i16x8 = 0; i16x8 < 2; i16x8++)
+		{
+			temp_cost +=  mb_me->mvc16x8[i16x8].cost;
+		}
+
+		if( temp_cost < i_cost)
+		{
+			i_cost = temp_cost;
+
+			h->mb.i_type = P_L0;
+			h->mb.i_partition = D_16x8;
+
+			for(int i16x8 = 0; i16x8 < 2; i16x8++)
+			{
+				int mx = mb_me->mvc16x8[i16x8].mv[0];
+				int my = mb_me->mvc16x8[i16x8].mv[1];
+
+				/* -> qpel mv */
+				uint32_t bmv = pack16to32_mask(mx,my);
+				uint32_t bmv_spel = SPELx2(bmv);
+				M32(a->l0.me16x8[i16x8].mv ) = bmv_spel;
+
+				a->l0.me16x8[i16x8].i_ref = 0;
+			}
+		}
+
+		temp_cost = 0;
+		for(int i8x16 = 0; i8x16 < 2; i8x16++)
+		{
+			temp_cost +=  mb_me->mvc8x16[i8x16].cost;
+		}
+
+		if( temp_cost < i_cost)
+		{
+			i_cost = temp_cost;
+
+			h->mb.i_type = P_L0;
+			h->mb.i_partition = D_8x16;
+
+			for(int i8x16 = 0; i8x16 < 2; i8x16++)
+			{
+				int mx = mb_me->mvc8x16[i8x16].mv[0];
+				int my = mb_me->mvc8x16[i8x16].mv[1];
+
+				/* -> qpel mv */
+				uint32_t bmv = pack16to32_mask(mx,my);
+				uint32_t bmv_spel = SPELx2(bmv);
+				M32(a->l0.me8x16[i8x16].mv ) = bmv_spel;
+
+				a->l0.me8x16[i8x16].i_ref = 0;
+			}
 		}
 	}
+
+
+
 
 	/* h->mb.i_type: P_SKIP analysis START*/
     int b_skip = 0;
@@ -3304,16 +3388,19 @@ skip_analysis_P:
                     case D_L0_8x4:
                         x264_macroblock_cache_mv_ptr( h, x, y+0, 2, 1, 0, a->l0.me8x4[i][0].mv );
                         x264_macroblock_cache_mv_ptr( h, x, y+1, 2, 1, 0, a->l0.me8x4[i][1].mv );
+                        //printf("***********D_L0_8x4\n");
                         break;
                     case D_L0_4x8:
                         x264_macroblock_cache_mv_ptr( h, x+0, y, 1, 2, 0, a->l0.me4x8[i][0].mv );
                         x264_macroblock_cache_mv_ptr( h, x+1, y, 1, 2, 0, a->l0.me4x8[i][1].mv );
+                        //printf("***********D_L0_4x8\n");
                         break;
                     case D_L0_4x4:
                         x264_macroblock_cache_mv_ptr( h, x+0, y+0, 1, 1, 0, a->l0.me4x4[i][0].mv );
                         x264_macroblock_cache_mv_ptr( h, x+1, y+0, 1, 1, 0, a->l0.me4x4[i][1].mv );
                         x264_macroblock_cache_mv_ptr( h, x+0, y+1, 1, 1, 0, a->l0.me4x4[i][2].mv );
                         x264_macroblock_cache_mv_ptr( h, x+1, y+1, 1, 1, 0, a->l0.me4x4[i][3].mv );
+                        //printf("***********D_L0_4x4\n");
                         break;
                     default:
                         x264_log( h, X264_LOG_ERROR, "internal error\n" );
@@ -3338,7 +3425,7 @@ skip_analysis_P:
 
 	/*--------------------------- End the analysis and update cache ---------------------------*/
 
-	 //x264_analyse_update_cache( h, &analysis );
+	//x264_analyse_update_cache( h, &analysis );
 
 	/* In rare cases we can end up qpel-RDing our way back to a larger partition size
 	 * without realizing it.  Check for this and account for it if necessary. */
