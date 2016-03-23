@@ -3067,8 +3067,16 @@ void x264_macroblock_analyse_P( x264_t *h )
 #define FPEL(mv) (((mv)+2)>>2) /* Convert subpel MV to fullpel with rounding... */
 #define SPEL(mv) ((mv)<<2)     /* ... and the reverse. */
 #define SPELx2(mv) (SPEL(mv)&0xFFFCFFFC) /* for two packed MVs */
+#define BITS_MVD( mx, my )\
+    (p_cost_mvx[(mx)<<2] + p_cost_mvy[(my)<<2])
 
 	x264_mb_analysis_t *a= &analysis;
+	int16_t mvp[2];
+	x264_mb_predict_mv_16x16( h, 0, 0, mvp );
+    uint16_t *p_cost_mvx = a->p_cost_mv - mvp[0];
+    uint16_t *p_cost_mvy = a->p_cost_mv- mvp[1];
+
+
 
 	int mb_x = h->mb.i_mb_x;
 	int mb_y = h->mb.i_mb_y;
@@ -3077,144 +3085,66 @@ void x264_macroblock_analyse_P( x264_t *h )
 
 	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
 
-	int temp_cost = 0;
-	for(int i8x8 = 0; i8x8 < 4; i8x8++)
+	int temp_cost = mb_me->mvc16x16.cost + BITS_MVD(mb_me->mvc16x16.mv[0], mb_me->mvc16x16.mv[1]);
+	if(temp_cost < i_cost)
 	{
-		temp_cost +=  mb_me->mvc8x8[i8x8].cost;
+		i_cost = mb_me->mvc16x16.cost;
+
+		h->mb.i_type = P_L0;
+		h->mb.i_partition = D_16x16;
+
+		int mx = mb_me->mvc16x16.mv[0];
+		int my = mb_me->mvc16x16.mv[1];
+
+		/* -> qpel mv */
+		uint32_t bmv = pack16to32_mask(mx,my);
+		uint32_t bmv_spel = SPELx2(bmv);
+		M32(a->l0.me16x16.mv ) = bmv_spel;
+
+		a->l0.me16x16.i_ref = 0;
 	}
 
-	if(temp_cost < mb_me->mvc16x16.cost)
+	temp_cost = 0;
+	for(int i8x8 = 0; i8x8 < 4; i8x8++)
+	{
+		x264_mb_predict_mv( h, 0, 4*i8x8, 2, mvp );
+		p_cost_mvx = a->p_cost_mv - mvp[0];
+		p_cost_mvy = a->p_cost_mv- mvp[1];
+
+		temp_cost +=  mb_me->mvc8x8[i8x8].cost + BITS_MVD(mb_me->mvc8x8[i8x8].mv[0], mb_me->mvc8x8[i8x8].mv[1]);
+	}
+
+	if(temp_cost < i_cost)
 	{
 		i_cost = temp_cost;
-		int i_sub_cost;
 
 		h->mb.i_type = P_8x8;
 		h->mb.i_partition = D_8x8;
 
 		for(int i8x8 = 0; i8x8 < 4; i8x8++)
 		{
-			{
-				h->mb.i_sub_partition[i8x8] = D_L0_8x8;
-				int mx = mb_me->mvc8x8[i8x8].mv[0];
-				int my = mb_me->mvc8x8[i8x8].mv[1];
+			h->mb.i_sub_partition[i8x8] = D_L0_8x8;
+			int mx = mb_me->mvc8x8[i8x8].mv[0];
+			int my = mb_me->mvc8x8[i8x8].mv[1];
 
-				/* -> qpel mv */
-				uint32_t bmv = pack16to32_mask(mx,my);
-				uint32_t bmv_spel = SPELx2(bmv);
-				M32(a->l0.me8x8[i8x8].mv ) = bmv_spel;
-				a->l0.me8x8[i8x8].i_ref = 0;
-
-//			    int x = 2*(i8x8&1);
-//			    int y = i8x8&2;
-//			    x264_macroblock_cache_mv_ptr( h, x, y, 2, 2, 0, a->l0.me8x8[i8x8].mv );
-			}
-			i_sub_cost = mb_me->mvc8x8[i8x8].cost;
-			continue;
-
-			int i8x8_x = i8x8%2;
-			int i8x8_y = i8x8/2;
-			temp_cost = 0;
-			int i = 0;
-			for(int i4x4_y = i8x8_y * 2; i4x4_y < i8x8_y * 2 + 2; i4x4_y++)
-			{
-				for(int i4x4_x = i8x8_x * 2; i4x4_x < i8x8_x * 2 + 2; i4x4_x++)
-				{
-					temp_cost += mb_me->mvc4x4[i4x4_x + i4x4_y * 4].cost;
-
-					int mx = mb_me->mvc4x4[i4x4_x + i4x4_y * 4].mv[0];
-					int my = mb_me->mvc4x4[i4x4_x + i4x4_y * 4].mv[1];
-					//printf("mx: %d	my: %d\n", mx, my);
-					/* -> qpel mv */
-					uint32_t bmv = pack16to32_mask(mx,my);
-					uint32_t bmv_spel = SPELx2(bmv);
-					M32(a->l0.me4x4[i8x8][i].mv ) = bmv_spel;
-					a->l0.me4x4[i8x8][i].i_ref = 0;
-					i++;
-				}
-			}
-			if( temp_cost < i_sub_cost)
-			{
-				//printf("temp_cost: %d	i_sub_cost: %d\n", temp_cost, i_sub_cost);
-				i_sub_cost = temp_cost;
-				h->mb.i_sub_partition[i8x8] = D_L0_4x4;
-
-			}
-			else
-			{
-				continue;
-				temp_cost = 0;
-				i = 0;
-				for(int i8x4_y = i8x8_y * 2; i8x4_y < i8x8_y * 2 + 2; i8x4_y++)
-				{
-					for(int i8x4_x = i8x8_x; i8x4_x < i8x8_x + 1; i8x4_x++)
-					{
-						temp_cost +=  mb_me->mvc8x4[i8x4_x + i8x4_y * 2].cost;
-						int mx = mb_me->mvc8x4[i8x4_x + i8x4_y * 2].mv[0];
-						int my = mb_me->mvc8x4[i8x4_x + i8x4_y * 2].mv[1];
-
-						/* -> qpel mv */
-						uint32_t bmv = pack16to32_mask(mx,my);
-						uint32_t bmv_spel = SPELx2(bmv);
-						M32(a->l0.me8x4[i8x8][i++].mv ) = bmv_spel;
-					}
-				}
-				if( temp_cost < i_sub_cost)
-				{
-					i_sub_cost = temp_cost;
-					h->mb.i_sub_partition[i8x8] = D_L0_8x4;
-
-				}
-
-
-				temp_cost = 0;
-				i = 0;
-				for(int i4x8_y = i8x8_y; i4x8_y < i8x8_y + 1; i4x8_y++)
-				{
-					for(int i4x8_x = i8x8_x * 2; i4x8_x < i8x8_x * 2 + 2; i4x8_x++)
-					{
-						temp_cost +=  mb_me->mvc8x4[i4x8_x + i4x8_y * 2].cost;
-						int mx = mb_me->mvc8x4[i4x8_x + i4x8_y * 2].mv[0];
-						int my = mb_me->mvc8x4[i4x8_x + i4x8_y * 2].mv[1];
-
-						/* -> qpel mv */
-						uint32_t bmv = pack16to32_mask(mx,my);
-						uint32_t bmv_spel = SPELx2(bmv);
-						M32(a->l0.me4x8[i8x8][i++].mv ) = bmv_spel;
-					}
-				}
-				if( temp_cost < i_sub_cost)
-				{
-					i_sub_cost = temp_cost;
-					h->mb.i_sub_partition[i8x8] = D_L0_4x8;
-
-				}
-			}
+			/* -> qpel mv */
+			uint32_t bmv = pack16to32_mask(mx,my);
+			uint32_t bmv_spel = SPELx2(bmv);
+			M32(a->l0.me8x8[i8x8].mv ) = bmv_spel;
+			a->l0.me8x8[i8x8].i_ref = 0;
 		}
 	}
 	else
 	{
 
-		{
-			i_cost = mb_me->mvc16x16.cost;
-
-			h->mb.i_type = P_L0;
-			h->mb.i_partition = D_16x16;
-
-			int mx = mb_me->mvc16x16.mv[0];
-			int my = mb_me->mvc16x16.mv[1];
-
-			/* -> qpel mv */
-			uint32_t bmv = pack16to32_mask(mx,my);
-			uint32_t bmv_spel = SPELx2(bmv);
-			M32(a->l0.me16x16.mv ) = bmv_spel;
-
-			a->l0.me16x16.i_ref = 0;
-		}
-
 		temp_cost = 0;
 		for(int i16x8 = 0; i16x8 < 2; i16x8++)
 		{
-			temp_cost +=  mb_me->mvc16x8[i16x8].cost;
+			x264_mb_predict_mv( h, 0, 8*i16x8, 4, mvp );
+			p_cost_mvx = a->p_cost_mv - mvp[0];
+			p_cost_mvy = a->p_cost_mv- mvp[1];
+
+			temp_cost +=  mb_me->mvc16x8[i16x8].cost+ BITS_MVD(mb_me->mvc16x8[i16x8].mv[0], mb_me->mvc16x8[i16x8].mv[1]);
 		}
 
 		if( temp_cost < i_cost)
@@ -3241,7 +3171,10 @@ void x264_macroblock_analyse_P( x264_t *h )
 		temp_cost = 0;
 		for(int i8x16 = 0; i8x16 < 2; i8x16++)
 		{
-			temp_cost +=  mb_me->mvc8x16[i8x16].cost;
+			x264_mb_predict_mv( h, 0, 4*i8x16, 2, mvp );
+			p_cost_mvx = a->p_cost_mv - mvp[0];
+			p_cost_mvy = a->p_cost_mv- mvp[1];
+			temp_cost +=  mb_me->mvc8x16[i8x16].cost+ BITS_MVD( mb_me->mvc8x16[i8x16].mv[0],  mb_me->mvc8x16[i8x16].mv[1]);
 		}
 
 		if( temp_cost < i_cost)
@@ -3265,8 +3198,6 @@ void x264_macroblock_analyse_P( x264_t *h )
 			}
 		}
 	}
-
-
 
 
 	/* h->mb.i_type: P_SKIP analysis START*/

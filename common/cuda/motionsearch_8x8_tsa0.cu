@@ -50,7 +50,7 @@ extern "C" void cuda_me_init( x264_cuda_t *c) {
 //	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->p_mvc16x16), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_mvc_t) ) );
 	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->me), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) ) );
 
-	printf("*****cuda_me_init***** %lu x 41 = %lu\n", sizeof(x264_cuda_mvc_t), sizeof(x264_cuda_me_t));
+//	printf("*****cuda_me_init***** %lu x 41 = %lu\n", sizeof(x264_cuda_mvc_t), sizeof(x264_cuda_me_t));
 }
 
 extern "C" void cuda_me_end( x264_cuda_t *c) {
@@ -150,7 +150,7 @@ __device__ void me_merge_16x16( int sadCache[4][Q_THREADS_PER_BLOCK], int sadMer
 			pixel *p_ref = p_fref + omx+ omy * stride_buf;
 
 			// set the sads values
-			sadSquare[offset] = x264_cuda_pixel_sad_8x16(p_fenc, stride_buf, p_ref, stride_buf);
+			sadSquare[offset] = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_ref, stride_buf);
 
 			// synchronize threads in this block
 			__syncthreads();
@@ -232,7 +232,7 @@ __device__ void me_merge_16x8( int sadCache[4][Q_THREADS_PER_BLOCK], int sadMerg
 			pixel *p_ref = p_fref + omx+ omy * stride_buf + ( i16x8 * 8 ) * stride_buf;
 
 			// set the sads values
-			sadSquare[offset] = x264_cuda_pixel_sad_8x16(p_fenc + ( i16x8 * 8 ) * stride_buf, stride_buf, p_ref, stride_buf);
+			sadSquare[offset] = x264_cuda_pixel_sad_16x8(p_fenc + ( i16x8 * 8 ) * stride_buf, stride_buf, p_ref, stride_buf);
 
 			// synchronize threads in this block
 			__syncthreads();
