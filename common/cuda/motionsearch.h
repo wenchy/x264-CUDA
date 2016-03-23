@@ -13,6 +13,10 @@
 #define MAX_INT 65535
 // 1024 = (16*2 * 16*2), also 2^10, also Max threads per block:  1024
 #define THREADS_PER_BLOCK 1024
+// Quarter of THREADS_PER_BLOCK: 256 = 1024/4
+#define Q_THREADS_PER_BLOCK 256
+// Quarter Quarter of THREADS_PER_BLOCK: 64 = 1024/4/4
+#define QQ_THREADS_PER_BLOCK 64
 
 enum
 {
