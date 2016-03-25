@@ -3070,6 +3070,7 @@ void x264_macroblock_analyse_P( x264_t *h )
 #define BITS_MVD( mx, my )\
     (p_cost_mvx[(mx)<<2] + p_cost_mvy[(my)<<2])
 
+	x264_mb_analyse_load_costs( h, &analysis );
 	x264_mb_analysis_t *a= &analysis;
 	int16_t mvp[2];
 	x264_mb_predict_mv_16x16( h, 0, 0, mvp );
