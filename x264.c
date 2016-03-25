@@ -1909,10 +1909,23 @@ static int encode( x264_param_t *param, cli_opt_t *opt )
 
     // added by Wenchy 2016-03-14
 #if HAVE_CUDA
-    h->cuda.i_mb_width = h->mb.i_mb_width;
-    h->cuda.i_mb_height = h->mb.i_mb_height;
-    h->cuda.i_me_range = h->param.analyse.i_me_range;
-    cuda_me_init( &(h->cuda) );
+
+    h->i_sub_mb_height = ( h->mb.i_mb_height + (X264_CUDA_THREADS - 1) )/ X264_CUDA_THREADS;
+    int i_last_thread = X264_CUDA_THREADS - 1;
+
+    for (int i = 0; i < X264_CUDA_THREADS - 1; i++)
+	{
+		h->cuda[i].i_mb_width = h->mb.i_mb_width;
+		h->cuda[i].i_mb_height = h->i_sub_mb_height;
+		h->cuda[i].i_me_range = h->param.analyse.i_me_range;
+		cuda_me_init( &(h->cuda[i]) );
+	}
+
+	h->cuda[i_last_thread].i_mb_width = h->mb.i_mb_width;
+	h->cuda[i_last_thread].i_mb_height = h->mb.i_mb_height - i_last_thread *  h->i_sub_mb_height;
+	h->cuda[i_last_thread].i_me_range = h->param.analyse.i_me_range;
+	cuda_me_init( &(h->cuda[i_last_thread]) );
+
 #endif
 
     /* Encode frames */
@@ -2033,7 +2046,12 @@ fail:
 
     // added by Wenchy 2016-03-14
 #if HAVE_CUDA
-    cuda_me_end( &(h->cuda) );
+
+    for (int i = 0; i < X264_CUDA_THREADS; i++)
+   	{
+    	cuda_me_end( &(h->cuda[i]) );
+   	}
+
 #endif
 
     return retval;

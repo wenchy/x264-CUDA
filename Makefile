@@ -173,10 +173,10 @@ GENERATED += common/oclobj.h
 SRCS += common/opencl.c encoder/slicetype-cl.c
 endif
 
-# added by Wenchy 2016-03-12: compile .cu file
+# added by Wenchy 2016-03-12: compile .cu file 
 ifeq ($(HAVE_CUDA),yes)
 common/cuda/motionsearch.o: common/cuda/motionsearch.cu
-	nvcc -G -c -o $@ $<
+	nvcc -G --default-stream per-thread -c -o $@ $<
 endif
 
 OBJS   += $(SRCS:%.c=%.o)

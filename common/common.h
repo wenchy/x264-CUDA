@@ -27,6 +27,9 @@
 #ifndef X264_COMMON_H
 #define X264_COMMON_H
 
+// added by Wenchy 2016-03-25
+#define X264_CUDA_THREADS 4
+
 /****************************************************************************
  * Macros
  ****************************************************************************/
@@ -977,7 +980,9 @@ struct x264_t
     x264_opencl_t opencl;
 #endif
 #if HAVE_CUDA
-    x264_cuda_t cuda;
+    int i_sub_mb_height;
+    int i_sub;
+    x264_cuda_t cuda[X264_CUDA_THREADS];
 #endif
 };
 
@@ -1026,7 +1031,7 @@ static int ALWAYS_INLINE x264_predictor_clip( int16_t (*dst)[2], int16_t (*mvc)[
 void save_frame(x264_t *h);
 
 #if HAVE_CUDA
-void cuda_me( x264_cuda_t *c);
+void *cuda_me( void *c);
 void cuda_me_init( x264_cuda_t *c);
 void cuda_me_end( x264_cuda_t *c);
 void cuda_me_prefetch( x264_cuda_t *c);

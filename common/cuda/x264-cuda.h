@@ -43,15 +43,18 @@ typedef struct x264_cuda_t
 	int i_mb_width;
 	int i_mb_height;
 
-	// block width, block height
-	int i_pixel;
-	int bw;
-	int bh;
+//	int i_sub_mb_height;
+//	int i_sub;
 
-	int mv_min_x;
-	int mv_min_y;
-	int mv_max_x;
-	int mv_max_y;
+	// block width, block height
+//	int i_pixel;
+//	int bw;
+//	int bh;
+
+//	int mv_min_x;
+//	int mv_min_y;
+//	int mv_max_x;
+//	int mv_max_y;
 
 	pixel *fenc_buf;
 	pixel *fref_buf;
@@ -60,11 +63,12 @@ typedef struct x264_cuda_t
 	pixel *dev_fref_buf;
 	int stride_buf;
 
-	uint16_t *p_cost_mvx;
-	uint16_t *p_cost_mvy;
+//	uint16_t *p_cost_mvx;
+//	uint16_t *p_cost_mvy;
 
 	// each MB have a me(x264_cuda_me_t)
 	x264_cuda_me_t *me;
+	x264_cuda_me_t *dev_me;
 } x264_cuda_t;
 
 

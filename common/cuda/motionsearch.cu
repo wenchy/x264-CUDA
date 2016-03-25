@@ -1,7 +1,11 @@
+/*
+ * 1. 8x8 SAD merge
+ * 2. Two step and Square search Algorithm: 8*8 = (16*2)/4 * (16*2)/4, and  (4+1)*(4+1)
+ */
 #include "x264-cuda.h"
 #include "motionsearch.h"
 
-__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf);
+__global__ void me(pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf);
 
 /****************************************************************************
  * cuda_pixel_sad_WxH
@@ -32,66 +36,24 @@ CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_8x4,    8,  4 )
 CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x8,    4,  8 )
 CUDA_PIXEL_SAD_C( x264_cuda_pixel_sad_4x4,    4,  4 )
 
-
-
-
-
-
-void save_frame(pixel *plane, int stride, int i_frame)
-{
-    FILE *pFile;
-    char szFilename[32];
-    int  x, y;
-    pixel zero = 0;
-
-    int width =  352;
-    int height = 288;
-
-
-    // Open file
-    sprintf(szFilename, "dev_frame_%d.ppm", i_frame);
-
-    pFile = fopen(szFilename, "wb");
-
-    if(pFile == NULL) {
-        return;
-    }
-    // Write header
-	fprintf(pFile, "P6\n%d %d\n255\n", width+PADH*2, height+PADV*2);
-
-	// Write pixel data
-	for(y = 0; y < height+PADV*2; y++) {
-		for(x = 0; x < width+PADH*2; x++) {
-		   fwrite(&(plane[x+stride*y]), 1, 1, pFile);
-		   fwrite(&zero, 1, 1, pFile);
-		   fwrite(&zero, 1, 1, pFile);
-		}
-	}
-    // Close file
-    fclose(pFile);
-}
 extern "C" void cuda_me_init( x264_cuda_t *c) {
 	int buf_width = 16 * c->i_mb_width + PADH*2;
 	int buf_height = 16 * c->i_mb_height + PADV*2;
 	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fenc_buf), buf_width * buf_height * sizeof(pixel) ) );
 	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_fref_buf), buf_width * buf_height * sizeof(pixel) ) );
-//	c->dev_fenc_plane = c->dev_fenc_buf + c->stride_buf * PADV + PADH;
-//	c->dev_fref_plane = c->dev_fref_buf + c->stride_buf * PADV + PADH;
-//	printf("%p	%p\n", c->dev_fenc_buf, c->dev_fenc_plane);
 
 	// mb mvc
+	c->me = (x264_cuda_me_t *)malloc( (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) );
+	HANDLE_ERROR( cudaMalloc( (void**)&(c->dev_me), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) ) );
 	// CUDA Unified Memory
-//	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->p_mvc16x16), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_mvc_t) ) );
-	HANDLE_ERROR( cudaMallocManaged( (void**)&(c->me), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) ) );
-
-//	printf("*****cuda_me_init***** %lu x 41 = %lu\n", sizeof(x264_cuda_mvc_t), sizeof(x264_cuda_me_t));
+	//HANDLE_ERROR( cudaMallocManaged( (void**)&(c->dev_me), (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t) ) );
 }
 
 extern "C" void cuda_me_end( x264_cuda_t *c) {
 	HANDLE_ERROR( cudaFree( c->dev_fenc_buf ) );
 	HANDLE_ERROR( cudaFree( c->dev_fref_buf ) );
-//	HANDLE_ERROR( cudaFree( c->p_mvc16x16 ) );
-	HANDLE_ERROR( cudaFree( c->me ) );
+	HANDLE_ERROR( cudaFree( c->dev_me ) );
+	free( c->me );
 	printf("*****cuda_me_end*****\n");
 }
 
@@ -104,34 +66,83 @@ extern "C" void cuda_me_prefetch( x264_cuda_t *c) {
 	//printf("*****cuda_me_prefetch*****\n");
 }
 
-extern "C" void cuda_me( x264_cuda_t *c) {
+extern "C" void cuda_me0( x264_cuda_t *c) {
 
 	int me_range = c->i_me_range;
 	int mb_width = c->i_mb_width;
 	int mb_height = c->i_mb_height;
 	int stride_buf = c->stride_buf;
 
+//	cudaEvent_t start, stop;
+//	cudaEventCreate(&start);
+//	cudaEventCreate(&stop);
+//	cudaEventRecord( start, 0 );
+
+	int buf_width = 16 * c->i_mb_width + PADH*2;
+	int buf_height = 16 * c->i_mb_height + PADV*2;
+	// copy 'fenc_buf' and 'fref_buf'  to the GPU memory
+	HANDLE_ERROR( cudaMemcpy( c->dev_fenc_buf, c->fenc_buf, buf_width * buf_height * sizeof(pixel), cudaMemcpyHostToDevice ) );
+	HANDLE_ERROR( cudaMemcpy( c->dev_fref_buf, c->fref_buf, buf_width * buf_height * sizeof(pixel), cudaMemcpyHostToDevice ) );
+	//printf("*****cuda_me_prefetch*****\n");
+
+
 
 	dim3    blocks(mb_width, mb_height);
-//	dim3    threads(me_range*2, me_range*2);
 
-	me<<<blocks, THREADS_PER_BLOCK>>>( c->i_pixel, c->dev_fenc_buf, c->dev_fref_buf, c->me, me_range, stride_buf);
-	HANDLE_ERROR( cudaPeekAtLastError() );
-	HANDLE_ERROR( cudaDeviceSynchronize() );
 
-//	if((*p_bmx) !=0 && (*p_bmy) != 0)
-//		printf("i_pixel: %d mx: %d	my: %d\n", c->i_pixel, mvc->mx, mvc->my);
+	me<<<blocks, QQ_THREADS_PER_BLOCK>>>(c->dev_fenc_buf, c->dev_fref_buf, c->dev_me, me_range, stride_buf);
+//	HANDLE_ERROR( cudaPeekAtLastError() );
+//	HANDLE_ERROR( cudaDeviceSynchronize() );
 
+
+
+	// copy the 'me' back from the GPU to the CPU
+	 HANDLE_ERROR( cudaMemcpy( c->me, c->dev_me, (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t), cudaMemcpyDeviceToHost ) );
+
+//	cudaEventRecord( stop, 0 );
+//	cudaEventSynchronize( stop );
+//	float elapsedTime;
+//	HANDLE_ERROR( cudaEventElapsedTime( &elapsedTime, start, stop ) );
+//	printf( "Time to generate: %3.1f ms\n", elapsedTime );
+//	HANDLE_ERROR( cudaEventDestroy( start ) );
+//	HANDLE_ERROR( cudaEventDestroy( stop ) );
 
 	return;
+}
+
+extern "C" void *cuda_me( void *arg ) {
+
+	x264_cuda_t *c= (x264_cuda_t *)arg;
+
+	int me_range = c->i_me_range;
+	int mb_width = c->i_mb_width;
+	int mb_height = c->i_mb_height;
+	int stride_buf = c->stride_buf;
+
+	dim3    blocks(mb_width, mb_height);
+
+
+	me<<<blocks, QQ_THREADS_PER_BLOCK>>>( c->dev_fenc_buf, c->dev_fref_buf, c->dev_me, me_range, stride_buf);
+//	HANDLE_ERROR( cudaPeekAtLastError() );
+//	HANDLE_ERROR( cudaDeviceSynchronize() );
+
+
+
+	// copy the 'me' back from the GPU to the CPU
+	 HANDLE_ERROR( cudaMemcpy( c->me, c->dev_me, (c->i_mb_width * c->i_mb_height) * sizeof(x264_cuda_me_t), cudaMemcpyDeviceToHost ) );
+	 return(NULL);
 }
 
 /* *****************************************************************
  * 1. 8x8 SAD merging into 16x16
  * 2. find least SAD and corresponding MV
  * *****************************************************************/
-__device__ void me_merge_16x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[THREADS_PER_BLOCK], int index[THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range )
+__device__ void me_merge_16x16( int sadCache[4][QQ_THREADS_PER_BLOCK], int sadMerge[QQ_THREADS_PER_BLOCK], int index[THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range, pixel *p_fenc, pixel *p_fref, int stride_buf)
 {
+	 __shared__ int sadSquare[QQ_THREADS_PER_BLOCK];
+	 __shared__ int sindex[QQ_THREADS_PER_BLOCK];
+	 int sub_range = me_range/2;
+
 	const int offset = threadIdx.x;
 	int mb_x = blockIdx.x;
 	int mb_y = blockIdx.y;
@@ -165,11 +176,54 @@ __device__ void me_merge_16x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge
 			i /= 2;
 		}
 
+//		if (offset == 0)
+//		{
+////			me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % ( me_range*2 ) - me_range;
+////			me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x16.cost = sadMerge[ index[0] ];
+//		}
+//		__syncthreads();
+
+		sadSquare[offset] = MAX_INT;
+		sindex[offset] = offset;
+		if (offset < 25)
+		{
+
+			int ox = index[0] % sub_range * 4 - 2 + offset%5;
+			int oy = index[0] / sub_range * 4 - 2 + offset/5;
+
+			pixel *p_ref = p_fref + ox+ oy * stride_buf;
+
+			// set the sads values
+			sadSquare[offset] = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_ref, stride_buf);
+
+		}
+
+		// synchronize threads in this block
+		__syncthreads();
+
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
+		// because of the following code： find least SAD
+		i = blockDim.x/4;
+		while (i != 0) {
+			if (offset < i)
+			{
+				if (sadSquare[ sindex[offset] ] > sadSquare[ sindex[offset + i] ])
+				{
+					sindex[offset] = sindex[offset + i];
+				}
+			}
+			__syncthreads();
+			i /= 2;
+		}
+
 		if (offset == 0)
 		{
-			me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc16x16.cost = sadMerge[ index[0] ];
+			me[mb_x + mb_y*mb_width].mvc16x16.mv[0] = index[0] % sub_range * 4 - me_range + sindex[0]%5 - 2;
+			me[mb_x + mb_y*mb_width].mvc16x16.mv[1] = index[0] / sub_range * 4 - me_range + sindex[0]/5 - 2;
+			me[mb_x + mb_y*mb_width].mvc16x16.cost = sadSquare[ sindex[0] ];
 		}
 		__syncthreads();
 	}
@@ -179,8 +233,12 @@ __device__ void me_merge_16x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge
  * 1. 8x8 SAD merging into 16x8
  * 2. find least SAD and corresponding MV
  * *****************************************************************/
-__device__ void me_merge_16x8( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[THREADS_PER_BLOCK], int index[THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range )
+__device__ void me_merge_16x8( int sadCache[4][QQ_THREADS_PER_BLOCK], int sadMerge[QQ_THREADS_PER_BLOCK], int index[QQ_THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range, pixel *p_fenc, pixel *p_fref, int stride_buf )
 {
+	 __shared__ int sadSquare[QQ_THREADS_PER_BLOCK];
+	 __shared__ int sindex[QQ_THREADS_PER_BLOCK];
+	 int sub_range = me_range/2;
+
 	const int offset = threadIdx.x;
 	int mb_x = blockIdx.x;
 	int mb_y = blockIdx.y;
@@ -196,7 +254,7 @@ __device__ void me_merge_16x8( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[
 		// synchronize threads in this block
 		__syncthreads();
 
-		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
 		// because of the following code： find least SAD
 		int i = blockDim.x/2;
 		while (i != 0) {
@@ -211,11 +269,54 @@ __device__ void me_merge_16x8( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[
 			i /= 2;
 		}
 
+//		if (offset == 0)
+//		{
+////			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
+////			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[0] = index[0] % me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[1] = index[0] / me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].cost = sadMerge[ index[0] ];
+//		}
+//		__syncthreads();
+
+		sadSquare[offset] = MAX_INT;
+		sindex[offset] = offset;
+		if (offset < 25)
+		{
+
+			int ox = index[0] % sub_range * 4 - 2 + offset%5;
+			int oy = index[0] / sub_range * 4 - 2 + offset/5;
+
+			pixel *p_ref = p_fref + ox+ oy * stride_buf + ( i16x8 * 8 ) * stride_buf;
+
+			// set the sads values
+			sadSquare[offset] = x264_cuda_pixel_sad_16x8(p_fenc + ( i16x8 * 8 ) * stride_buf, stride_buf, p_ref, stride_buf);
+
+		}
+
+		// synchronize threads in this block
+		__syncthreads();
+
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
+		// because of the following code： find least SAD
+		i = blockDim.x/4;
+		while (i != 0) {
+			if (offset < i)
+			{
+				if (sadSquare[ sindex[offset] ] > sadSquare[ sindex[offset + i] ])
+				{
+					sindex[offset] = sindex[offset + i];
+				}
+			}
+			__syncthreads();
+			i /= 2;
+		}
+
 		if (offset == 0)
 		{
-			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].cost = sadMerge[ index[0] ];
+			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[0] = index[0] % sub_range * 4 - me_range + sindex[0]%5 - 2;
+			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].mv[1] = index[0] / sub_range * 4 - me_range + sindex[0]/5 - 2;
+			me[mb_x + mb_y*mb_width].mvc16x8[i16x8].cost = sadSquare[ sindex[0] ];
 		}
 		__syncthreads();
 	}
@@ -225,8 +326,12 @@ __device__ void me_merge_16x8( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[
  * 1. 8x8 SAD merging into 8x16
  * 2. find least SAD and corresponding MV
  * *****************************************************************/
-__device__ void me_merge_8x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[THREADS_PER_BLOCK], int index[THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range )
+__device__ void me_merge_8x16( int sadCache[4][QQ_THREADS_PER_BLOCK], int sadMerge[QQ_THREADS_PER_BLOCK], int index[QQ_THREADS_PER_BLOCK], x264_cuda_me_t *me, int me_range, pixel *p_fenc, pixel *p_fref, int stride_buf )
 {
+	 __shared__ int sadSquare[QQ_THREADS_PER_BLOCK];
+	 __shared__ int sindex[QQ_THREADS_PER_BLOCK];
+	 int sub_range = me_range/2;
+
 	const int offset = threadIdx.x;
 	int mb_x = blockIdx.x;
 	int mb_y = blockIdx.y;
@@ -241,7 +346,7 @@ __device__ void me_merge_8x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[
 		// synchronize threads in this block
 		__syncthreads();
 
-		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
 		// because of the following code： find least SAD
 		int i = blockDim.x/2;
 		while (i != 0) {
@@ -256,24 +361,73 @@ __device__ void me_merge_8x16( int sadCache[4][THREADS_PER_BLOCK], int sadMerge[
 			i /= 2;
 		}
 
+//		if (offset == 0)
+//		{
+//			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[0] = index[0] % me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[1] = index[0] / me_range * 2 - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].cost = sadMerge[ index[0] ];
+//		}
+//		__syncthreads();
+
+		sadSquare[offset] = MAX_INT;
+		sindex[offset] = offset;
+		if (offset < 25)
+		{
+
+			int ox = index[0] % sub_range * 4 - 2 + offset%5;
+			int oy = index[0] / sub_range * 4 - 2 + offset/5;
+
+			pixel *p_ref = p_fref + ox+ oy * stride_buf + ( i8x16 * 8);
+
+			// set the sads values
+			sadSquare[offset] = x264_cuda_pixel_sad_8x16(p_fenc + i8x16 * 8, stride_buf, p_ref, stride_buf);
+
+		}
+
+		// synchronize threads in this block
+		__syncthreads();
+
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
+		// because of the following code： find least SAD
+		i = blockDim.x/4;
+		while (i != 0) {
+			if (offset < i)
+			{
+				if (sadSquare[ sindex[offset] ] > sadSquare[ sindex[offset + i] ])
+				{
+					sindex[offset] = sindex[offset + i];
+				}
+			}
+			__syncthreads();
+			i /= 2;
+		}
+
 		if (offset == 0)
 		{
-			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[0] = index[0] % ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[1] = index[0] / ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].cost = sadMerge[ index[0] ];
+			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[0] = index[0] % sub_range * 4 - me_range + sindex[0]%5 - 2;
+			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].mv[1] = index[0] / sub_range * 4 - me_range + sindex[0]/5 - 2;
+			me[mb_x + mb_y*mb_width].mvc8x16[i8x16].cost = sadSquare[ sindex[0] ];
 		}
 		__syncthreads();
 	}
 }
 
-__global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf) {
-	 __shared__ int sadCache[4][THREADS_PER_BLOCK]; // 16k
-	 __shared__ int sadMerge[THREADS_PER_BLOCK]; // 4k
-	 __shared__ int index[THREADS_PER_BLOCK]; // 4k
+__global__ void me(pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_me_t *me, int me_range, int stride_buf) {
+	 __shared__ int sadCache[4][QQ_THREADS_PER_BLOCK];
+	 __shared__ int sadMerge[QQ_THREADS_PER_BLOCK];
+	 __shared__ int index[QQ_THREADS_PER_BLOCK];
+
+	 __shared__ int sadSquare[QQ_THREADS_PER_BLOCK];
+	 __shared__ int sindex[QQ_THREADS_PER_BLOCK];
+
+	int sub_range = me_range/2;
 
 	const int offset = threadIdx.x;
-	int ox = threadIdx.x % ( me_range*2 );
-	int oy = threadIdx.x / ( me_range*2 );
+//	int ox = threadIdx.x % ( me_range*2 );
+//	int oy = threadIdx.x / ( me_range*2 );
+
+	int ox = threadIdx.x % sub_range * 4;
+	int oy = threadIdx.x / sub_range * 4;
 
 	int mb_x = blockIdx.x;
 	int mb_y = blockIdx.y;
@@ -303,7 +457,7 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 		// synchronize threads in this block
 		__syncthreads();
 
-		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
 		// because of the following code： find least SAD
 		int i = blockDim.x/2;
 		while (i != 0) {
@@ -318,325 +472,42 @@ __global__ void me( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_
 			i /= 2;
 		}
 
-		if (offset == 0)
+
+//		if (offset == 0)
+//		{
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadCache[i8x8][ index[0] ];
+//		}
+//		__syncthreads();
+
+
+		sadSquare[offset] = MAX_INT;
+		sindex[offset] = offset;
+		if (offset < 25)
 		{
-			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
-			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadCache[i8x8][ index[0] ];
+
+			ox = index[0] % sub_range * 4 - 2 + offset%5;
+			oy = index[0] / sub_range * 4 - 2 + offset/5;
+
+			p_ref = p_fref + ox+ oy * stride_buf + ( i8x8_x * 8 + (i8x8_y * 8) * stride_buf );
+
+			// set the sads values
+			sadSquare[offset] = x264_cuda_pixel_sad_8x8(p_enc, stride_buf, p_ref, stride_buf);
 		}
-		__syncthreads();
-	}
-
-	me_merge_16x16(sadCache, sadMerge, index, me, me_range);
-	me_merge_16x8(sadCache, sadMerge, index, me, me_range);
-	me_merge_8x16(sadCache, sadMerge, index, me, me_range);
-
-}
-
-__global__ void me0( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf) {
-	 __shared__ int sadCache[THREADS_PER_BLOCK]; // 4k
-	 __shared__ int index[THREADS_PER_BLOCK]; // 4k
-
-	// map from blockIdx to pixel position
-//	int x = blockIdx.x;
-//	int y = blockIdx.y;
-//	int offset = x + y * gridDim.x;
-
-	int offset = threadIdx.x;
-	int x = threadIdx.x % ( me_range*2 );
-	int y = threadIdx.x / ( me_range*2 );
-
-	int mb_x = blockIdx.x;
-	int mb_y = blockIdx.y;
-	int mb_width = gridDim.x;
-
-	pixel *p_fenc_plane = dev_fenc_buf + stride_buf * PADV + PADH;
-	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
-
-	pixel *p_fenc = p_fenc_plane + ( 16 * mb_x) +( 16 * mb_y)* stride_buf;
-	pixel *p_fref = p_fref_plane + ( 16 * mb_x + x - me_range) +( 16 * mb_y + y - me_range)* stride_buf;
-	//p_fref += bmx +bmy * stride_buf;
-
-	int temp = MAX_INT;
-	switch(i_pixel)
-	{
-		case PIXEL_16x16:
-			temp = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_16x8:
-			temp = x264_cuda_pixel_sad_16x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x16:
-			temp = x264_cuda_pixel_sad_8x16(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x8:
-			temp = x264_cuda_pixel_sad_8x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_8x4:
-			temp = x264_cuda_pixel_sad_8x4(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_4x8:
-			temp = x264_cuda_pixel_sad_4x8(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		case PIXEL_4x4:
-			temp = x264_cuda_pixel_sad_4x4(p_fenc, stride_buf, p_fref, stride_buf);
-			break;
-		default:
-			break;
-
-	}
-	//temp = cudafpelcmp[i_pixel](p_fenc, stride_buf, p_fref, stride_buf);
-	//temp = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
-
-	// set the sads values
-	sadCache[offset] = temp;
-	index[offset] = offset;
-
-	// synchronize threads in this block
-	__syncthreads();
-
-	// for reductions, THREADS_PER_BLOCK must be a power of 2
-	// because of the following code： find least SAD
-	int i = blockDim.x/2;
-	while (i != 0) {
-		if (offset < i)
-		{
-			if (sadCache[ index[offset] ] > sadCache[ index[offset + i] ])
-			{
-				index[offset] = index[offset + i];
-			}
-		}
-		__syncthreads();
-		i /= 2;
-	}
-
-	if (offset == 0)
-	{
-		p_mvc16x16[mb_x + mb_y*mb_width].mv[0] = index[0] % ( me_range*2 ) - me_range;
-		p_mvc16x16[mb_x + mb_y*mb_width].mv[1] = index[0] / ( me_range*2 ) - me_range;
-		p_mvc16x16[mb_x + mb_y*mb_width].cost = sadCache[ index[0] ];
-
-//		mvc->cost = sadCache[ index[0] ];
-//		mvc->mx = index[0] % ( me_range*2 ) - me_range;
-//		mvc->my = index[0] / ( me_range*2 ) - me_range;
-	}
-}
-
-// with shared memory cache of mb_enc and mb_ref
-__global__ void me_shared_cache( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf) {
-	 __shared__ int sadCache[THREADS_PER_BLOCK]; // 4k
-	 __shared__ int index[THREADS_PER_BLOCK];	// 4k
-
-	 __shared__ pixel mb_enc[16*16];
-	 __shared__ pixel mb_ref[16*3 * 16*3]; //3k
-	 int stride_enc = 16;
-	 int stride_ref = 16*3;
-
-	int offset = threadIdx.x;
-
-
-	int mb_x = blockIdx.x;
-	int mb_y = blockIdx.y;
-	int mb_width = gridDim.x;
-
-	pixel *p_fenc_plane = dev_fenc_buf + stride_buf * PADV + PADH;
-	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
-
-	int x = threadIdx.x % ( me_range*2 );
-	int y = threadIdx.x / ( me_range*2 );
-	pixel *p_mb_ref = &(mb_ref[x + y*stride_ref]);
-
-	pixel *p_fenc = p_fenc_plane + ( 16 * mb_x) +( 16 * mb_y)* stride_buf;
-	pixel *p_fref = p_fref_plane + ( 16 * mb_x - me_range) +( 16 * mb_y - me_range)* stride_buf;
-
-	if(offset < 16*16)
-	{
-		int x = offset % 16;
-		int y = offset / 16;
-		mb_enc[x + y*stride_enc] = p_fenc[x + y*stride_buf];
-	}
-
-	x = offset % (16*3);
-	y = offset / (16*3);
-	mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-	x = (offset + THREADS_PER_BLOCK) % (16*3);
-	y = (offset + THREADS_PER_BLOCK) / (16*3);
-	mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-
-	if(offset + 2*THREADS_PER_BLOCK < 16*3 * 16*3)
-	{
-		x = (offset + 2*THREADS_PER_BLOCK) % (16*3);
-		y = (offset + 2*THREADS_PER_BLOCK) / (16*3);
-		mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-	}
-
-	// synchronize threads in this block: loading 'shared' memory mb_enc and mb_ref from 'global' memory
-	__syncthreads();
-
-	int temp = MAX_INT;
-	switch(i_pixel)
-	{
-		case PIXEL_16x16:
-			temp = x264_cuda_pixel_sad_16x16(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_16x8:
-			temp = x264_cuda_pixel_sad_16x8(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_8x16:
-			temp = x264_cuda_pixel_sad_8x16(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_8x8:
-			temp = x264_cuda_pixel_sad_8x8(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_8x4:
-			temp = x264_cuda_pixel_sad_8x4(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_4x8:
-			temp = x264_cuda_pixel_sad_4x8(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		case PIXEL_4x4:
-			temp = x264_cuda_pixel_sad_4x4(mb_enc, stride_enc, p_mb_ref, stride_ref);
-			break;
-		default:
-			break;
-
-	}
-	//temp = cudafpelcmp[i_pixel](p_fenc, stride_buf, p_fref, stride_buf);
-	//temp = x264_cuda_pixel_sad_16x16(p_fenc, stride_buf, p_fref, stride_buf);
-
-	// set the sads values
-	sadCache[offset] = temp;
-	index[offset] = offset;
-
-	// synchronize threads in this block
-	__syncthreads();
-
-	// for reductions, THREADS_PER_BLOCK must be a power of 2
-	// because of the following code： find least SAD
-	int i = blockDim.x/2;
-	while (i != 0) {
-		if (offset < i)
-		{
-			if (sadCache[ index[offset] ] > sadCache[ index[offset + i] ])
-			{
-				index[offset] = index[offset + i];
-			}
-		}
-		__syncthreads();
-		i /= 2;
-	}
-
-	if (offset == 0)
-	{
-		p_mvc16x16[mb_x + mb_y*mb_width].mv[0] = index[0] % ( me_range*2 ) - me_range;
-		p_mvc16x16[mb_x + mb_y*mb_width].mv[1] = index[0] / ( me_range*2 ) - me_range;
-		p_mvc16x16[mb_x + mb_y*mb_width].cost = sadCache[ index[0] ];
-
-//		mvc->cost = sadCache[ index[0] ];
-//		mvc->mx = index[0] % ( me_range*2 ) - me_range;
-//		mvc->my = index[0] / ( me_range*2 ) - me_range;
-	}
-}
-
-
-// two encoding MB process in one thread block
-__global__ void me_two_mb( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf, x264_cuda_mvc_t *p_mvc16x16, int me_range, int stride_buf) {
-	 __shared__ int sadCache[THREADS_PER_BLOCK]; // 4k
-	 __shared__ int index[THREADS_PER_BLOCK];	// 4k
-
-	 __shared__ pixel mb_enc[16*2 *16];
-	 __shared__ pixel mb_ref[16*4 * 16*3]; //3k
-	 int stride_enc = 16*2;
-	 int stride_ref = 16*4;
-
-	int offset = threadIdx.x;
-
-
-	int mb_x = blockIdx.x;
-	int mb_y = blockIdx.y;
-	int mb_width = gridDim.x;
-
-	pixel *p_fenc_plane = dev_fenc_buf + stride_buf * PADV + PADH;
-	pixel *p_fref_plane = dev_fref_buf + stride_buf * PADV + PADH;
-
-	int ox = threadIdx.x % ( me_range*2 );
-	int oy = threadIdx.x / ( me_range*2 );
-
-
-	pixel *p_fenc = p_fenc_plane + ( 16 * mb_x) +( 16 * mb_y)* stride_buf;
-	pixel *p_fref = p_fref_plane + ( 16 * mb_x - me_range) +( 16 * mb_y - me_range)* stride_buf;
-
-	if(offset < 16*16 * 2)
-	{
-		int x = offset % stride_enc;
-		int y = offset / stride_enc;
-		mb_enc[x + y*stride_enc] = p_fenc[x + y*stride_buf];
-	}
-
-	int x = offset % stride_ref;
-	int y = offset / stride_ref;
-	mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-	x = (offset + THREADS_PER_BLOCK) % stride_ref;
-	y = (offset + THREADS_PER_BLOCK) / stride_ref;
-	mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-
-	x = (offset + 2*THREADS_PER_BLOCK) % stride_ref;
-	y = (offset + 2*THREADS_PER_BLOCK) / stride_ref;
-	mb_ref[x + y*stride_ref] = p_fref[x + y*stride_buf];
-
-
-	// synchronize threads in this block: loading 'shared' memory mb_enc and mb_ref from 'global' memory
-	__syncthreads();
-
-	for(int i_mb = 0; i_mb < 2; i_mb++)
-	{
-		int temp = MAX_INT;
-		pixel *p_mb_enc = &(mb_enc[i_mb*16]);
-		pixel *p_mb_ref = &(mb_ref[i_mb*16 + ox + oy*stride_ref]);
-		switch(i_pixel)
-		{
-			case PIXEL_16x16:
-				temp = x264_cuda_pixel_sad_16x16(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_16x8:
-				temp = x264_cuda_pixel_sad_16x8(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_8x16:
-				temp = x264_cuda_pixel_sad_8x16(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_8x8:
-				temp = x264_cuda_pixel_sad_8x8(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_8x4:
-				temp = x264_cuda_pixel_sad_8x4(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_4x8:
-				temp = x264_cuda_pixel_sad_4x8(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			case PIXEL_4x4:
-				temp = x264_cuda_pixel_sad_4x4(p_mb_enc, stride_enc, p_mb_ref, stride_ref);
-				break;
-			default:
-				break;
-
-		}
-
-		// set the sads values
-		sadCache[offset] = temp;
-		index[offset] = offset;
 
 		// synchronize threads in this block
 		__syncthreads();
 
-		// for reductions, THREADS_PER_BLOCK must be a power of 2
+		// for reductions, QQ_THREADS_PER_BLOCK must be a power of 2
 		// because of the following code： find least SAD
-		int i = blockDim.x/2;
+		i = blockDim.x/4;
 		while (i != 0) {
 			if (offset < i)
 			{
-				if (sadCache[ index[offset] ] > sadCache[ index[offset + i] ])
+				if (sadSquare[ sindex[offset] ] > sadSquare[ sindex[offset + i] ])
 				{
-					index[offset] = index[offset + i];
+					sindex[offset] = sindex[offset + i];
 				}
 			}
 			__syncthreads();
@@ -645,10 +516,18 @@ __global__ void me_two_mb( int i_pixel, pixel *dev_fenc_buf, pixel *dev_fref_buf
 
 		if (offset == 0)
 		{
-			p_mvc16x16[i_mb + mb_x + mb_y*mb_width].mv[0] = index[0] % ( me_range*2 ) - me_range;
-			p_mvc16x16[i_mb + mb_x + mb_y*mb_width].mv[1] = index[0] / ( me_range*2 ) - me_range;
-			p_mvc16x16[i_mb + mb_x + mb_y*mb_width].cost = sadCache[ index[0] ];
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[0] = index[0] % ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / ( me_range*2 ) - me_range;
+//			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadCache[i8x8][ index[0] ];
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[0] = index[0] % sub_range * 4 - me_range + sindex[0]%5 - 2;
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].mv[1] = index[0] / sub_range * 4 - me_range + sindex[0]/5 - 2;
+			me[mb_x + mb_y*mb_width].mvc8x8[i8x8].cost = sadSquare[ sindex[0] ];
 		}
 		__syncthreads();
 	}
+
+	me_merge_16x16(sadCache, sadMerge, index, me, me_range, p_fenc, p_fref, stride_buf);
+	me_merge_16x8(sadCache, sadMerge, index, me, me_range, p_fenc, p_fref, stride_buf);
+	me_merge_8x16(sadCache, sadMerge, index, me, me_range, p_fenc, p_fref, stride_buf);
+
 }

@@ -3070,20 +3070,30 @@ void x264_macroblock_analyse_P( x264_t *h )
 #define BITS_MVD( mx, my )\
     (p_cost_mvx[(mx)<<2] + p_cost_mvy[(my)<<2])
 
+	x264_mb_analyse_load_costs( h, &analysis );
 	x264_mb_analysis_t *a= &analysis;
+
 	int16_t mvp[2];
 	x264_mb_predict_mv_16x16( h, 0, 0, mvp );
-    uint16_t *p_cost_mvx = a->p_cost_mv - mvp[0];
-    uint16_t *p_cost_mvy = a->p_cost_mv- mvp[1];
+	uint16_t *p_cost_mvx = a->p_cost_mv - mvp[0];
+	uint16_t *p_cost_mvy = a->p_cost_mv- mvp[1];
+
+//    uint16_t *p_cost_mvx = a->p_cost_mv;
+//    uint16_t *p_cost_mvy = a->p_cost_mv;
 
 
 
 	int mb_x = h->mb.i_mb_x;
-	int mb_y = h->mb.i_mb_y;
+	int mb_y = h->mb.i_mb_y - h->i_sub_mb_height * h->i_sub;
 	int mb_width = h->mb.i_mb_width;
 	//int mb_height = h->mb.i_mb_height;
 
-	x264_cuda_me_t *mb_me = &(h->cuda.me[mb_x + mb_y*mb_width]);
+	x264_cuda_me_t *mb_me = &(h->cuda[h->i_sub].me[mb_x + mb_y*mb_width]);
+
+//	fprintf(stderr, "mx: %d		my: %d\n", mb_me->mvc16x16.mv[0], mb_me->mvc16x16.mv[1]);
+//
+//	fprintf(stderr, "mxc: %d	myc: %d\n", p_cost_mvx[(mb_me->mvc16x16.mv[0])<<2], p_cost_mvy[(mb_me->mvc16x16.mv[1])<<2]);
+
 
 	int temp_cost = mb_me->mvc16x16.cost + BITS_MVD(mb_me->mvc16x16.mv[0], mb_me->mvc16x16.mv[1]);
 	if(temp_cost < i_cost)
@@ -3174,6 +3184,7 @@ void x264_macroblock_analyse_P( x264_t *h )
 			x264_mb_predict_mv( h, 0, 4*i8x16, 2, mvp );
 			p_cost_mvx = a->p_cost_mv - mvp[0];
 			p_cost_mvy = a->p_cost_mv- mvp[1];
+
 			temp_cost +=  mb_me->mvc8x16[i8x16].cost+ BITS_MVD( mb_me->mvc8x16[i8x16].mv[0],  mb_me->mvc8x16[i8x16].mv[1]);
 		}
 
